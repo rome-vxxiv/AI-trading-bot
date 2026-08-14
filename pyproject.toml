@@ -1,0 +1,55 @@
+[project]
+name = "capital-agent"
+version = "0.2.0"
+description = "Session-aware LLM trading agent driver on top of capital-com-sv/capital-mcp"
+requires-python = ">=3.11"
+dependencies = [
+    "apscheduler>=3.10,<4",
+    "sqlalchemy[asyncio]>=2.0,<3",
+    "aiosqlite>=0.19",
+    "structlog>=24.1",
+    "pyyaml>=6.0",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "mcp>=1.0",
+    "python-dotenv>=1.0",
+    "capital-mcp @ git+https://github.com/capital-com-sv/capital-mcp.git@main",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=4",
+    "freezegun>=1.4",
+    "ruff>=0.4",
+    "mypy>=1.10",
+]
+
+[project.scripts]
+capital-agent = "capital_agent.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "C4", "UP", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
