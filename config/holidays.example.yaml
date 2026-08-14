@@ -1,0 +1,37 @@
+# Exchange holidays for the current year. Instrument sessions skipped
+# entirely on these dates. Add per-venue keys as more instruments are added.
+
+year: 2026
+
+US:      # affects US500, US100, US30, US equities on NYSE/NASDAQ
+  - 2026-01-01   # New Year's Day
+  - 2026-01-19   # MLK Day
+  - 2026-02-16   # Presidents' Day
+  - 2026-04-03   # Good Friday
+  - 2026-05-25   # Memorial Day
+  - 2026-06-19   # Juneteenth
+  - 2026-07-03   # Independence Day observed
+  - 2026-09-07   # Labor Day
+  - 2026-11-26   # Thanksgiving
+  - 2026-12-25   # Christmas
+
+UK:       # affects UK100
+  - 2026-01-01
+  - 2026-04-03
+  - 2026-04-06
+  - 2026-05-04
+  - 2026-05-25
+  - 2026-08-31
+  - 2026-12-25
+  - 2026-12-28
+
+DE:       # affects DE40
+  - 2026-01-01
+  - 2026-04-03
+  - 2026-04-06
+  - 2026-05-01
+  - 2026-12-24
+  - 2026-12-25
+  - 2026-12-31
+
+# Crypto: none (24/7)

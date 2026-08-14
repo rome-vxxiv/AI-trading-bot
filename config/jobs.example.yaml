@@ -1,0 +1,31 @@
+# Scheduled jobs: strategies x instruments x cadence tiers.
+# Only one enabled by default (slow-tier crypto).
+
+tiers:
+  fast:   { interval_seconds: 300  }  # 5 min
+  medium: { interval_seconds: 900  }  # 15 min
+  slow:   { interval_seconds: 3600 }  # 60 min
+  eod:    { at: "23:30 UTC" }
+
+jobs:
+
+  - id: donchian_btc_1h
+    enabled: true
+    strategy: donchian_breakout
+    epic: BTCUSD
+    tier: slow
+    active_windows: []                 # empty = whenever epic session is open
+
+  - id: rsi_gold_15m
+    enabled: false
+    strategy: rsi_mean_reversion
+    epic: GOLD
+    tier: medium
+
+  - id: session_open_us500
+    enabled: false
+    strategy: opening_range_breakout
+    epic: US500
+    tier: fast
+    active_windows:
+      - "13:30-15:30 MON-FRI"

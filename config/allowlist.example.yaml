@@ -1,0 +1,9 @@
+# Tradable epics. Mirrors CAP_ALLOWED_EPICS in .env, but this file is the
+# scheduler's authoritative view — the driver refuses to trade an epic
+# absent here even if the MCP server would accept it.
+epics:
+  - BTCUSD    # only symbol enabled in first-run defaults
+# - ETHUSD
+# - GOLD
+# - EURUSD
+# - US500

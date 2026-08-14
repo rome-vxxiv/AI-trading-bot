@@ -1,0 +1,39 @@
+# Secrets & runtime
+.env
+.env.local
+*.secret
+config/*.yaml
+!config/*.example.yaml
+config/mcp.json
+!config/mcp.example.json
+
+# Local state
+/var/
+state.db
+state.db-journal
+*.sqlite
+*.sqlite-journal
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Vendored upstream (kept out of tree; use docker or pip install)
+/vendor/capital-mcp/

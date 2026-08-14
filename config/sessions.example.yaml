@@ -1,0 +1,62 @@
+# Per-instrument market-session windows. On startup, the scheduler queries
+# cap_market_get(epic) for each configured epic and reconciles openingHours
+# with these defaults. Capital.com's own schedule wins on conflict.
+#
+# All times UTC. `guard` windows are always-skip.
+
+defaults:
+  guard_minutes_around_hour: []      # e.g. [55, 56, 57, 58, 59, 0, 1, 2, 3, 4] to skip top-of-hour
+
+instruments:
+
+  # ---------------- Crypto: 24/7 ------------------------------------
+  BTCUSD:
+    open: "SUN 00:00"
+    close: "SUN 00:00"                # wraps -> continuous
+    guards: []
+  ETHUSD: { open: "SUN 00:00", close: "SUN 00:00", guards: [] }
+  SOLUSD: { open: "SUN 00:00", close: "SUN 00:00", guards: [] }
+
+  # ---------------- FX majors: Sun 22:00 -> Fri 22:00 --------------
+  EURUSD:
+    open: "SUN 22:00"
+    close: "FRI 22:00"
+    guards:
+      - "DAILY 21:55-22:05"           # rollover, spread widening
+  GBPUSD: { open: "SUN 22:00", close: "FRI 22:00", guards: ["DAILY 21:55-22:05"] }
+  USDJPY: { open: "SUN 22:00", close: "FRI 22:00", guards: ["DAILY 21:55-22:05"] }
+
+  # ---------------- Metals -----------------------------------------
+  GOLD:
+    open: "SUN 22:00"
+    close: "FRI 21:00"
+    guards: ["DAILY 21:00-22:00"]
+  SILVER: { open: "SUN 22:00", close: "FRI 21:00", guards: ["DAILY 21:00-22:00"] }
+
+  # ---------------- Energy -----------------------------------------
+  OIL_CRUDE:
+    open: "SUN 23:00"
+    close: "FRI 22:00"
+    guards: ["DAILY 22:00-23:00"]
+  NATURALGAS: { open: "SUN 23:00", close: "FRI 22:00", guards: ["DAILY 22:00-23:00"] }
+
+  # ---------------- US indices -------------------------------------
+  US500:
+    open: "SUN 22:00"
+    close: "FRI 21:00"
+    guards: ["DAILY 21:00-22:00"]
+    cash_session: "13:30-20:00 MON-FRI"     # higher-cadence tier window
+  US100: { open: "SUN 22:00", close: "FRI 21:00", guards: ["DAILY 21:00-22:00"], cash_session: "13:30-20:00 MON-FRI" }
+  US30:  { open: "SUN 22:00", close: "FRI 21:00", guards: ["DAILY 21:00-22:00"], cash_session: "13:30-20:00 MON-FRI" }
+
+  # ---------------- EU indices -------------------------------------
+  DE40:
+    open: "MON 07:00"
+    close: "FRI 20:00"
+    guards: []
+  UK100: { open: "MON 07:00", close: "FRI 20:00", guards: [] }
+
+# Global guard applied around every scheduled tick regardless of instrument:
+global_guards:
+  # Skip first/last 5 minutes of the session windows above.
+  session_edge_minutes: 5

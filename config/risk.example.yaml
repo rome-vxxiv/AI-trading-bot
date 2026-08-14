@@ -1,0 +1,22 @@
+# Our-driver risk layer. Sits ABOVE the upstream MCP's built-in caps.
+# All numbers here can only be equal to or stricter than upstream — never looser.
+
+dry_run: true                 # driver intercepts execute even if model calls it
+
+risk_pct_per_trade: 0.0025    # 0.25% of equity per trade (default first-run)
+max_positions_total: 1
+max_positions_per_instrument: 1
+max_daily_loss_pct: 0.01      # 1% of start-of-day equity
+max_drawdown_pct: 0.05        # 5% from HWM -> kill switch
+
+stop:
+  required: true              # every entry MUST include a stop-loss in preview
+  max_atr_multiples: 5.0      # reject if stop distance > 5 * ATR(14) on strategy TF
+  atr_period: 14
+
+cooldowns:
+  after_any_trade_minutes: 15
+  after_losing_trade_minutes: 60
+
+spread:
+  max_multiple_of_median_1h: 2.0

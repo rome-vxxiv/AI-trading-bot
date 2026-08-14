@@ -1,0 +1,22 @@
+# Full-stack compose. `capital-mcp` builds from a pinned upstream tag so
+# we track upstream via `docker compose pull && up -d` without forking.
+# scheduler / driver / health services will be added as they are built.
+
+services:
+
+  capital-mcp:
+    build:
+      context: ./docker/capital-mcp
+      # UPSTREAM_REF is a tag or commit sha from capital-com-sv/capital-mcp.
+      args:
+        UPSTREAM_REF: main
+    container_name: capital-mcp
+    env_file: .env
+    restart: unless-stopped
+    # No ports published: the scheduler / driver reach the server over
+    # `docker exec -i capital-mcp python -m capital_mcp` via stdio, per
+    # the Claude Code mcp.json.
+
+  # scheduler:        # to be added in build step (2)
+  # health-api:       # to be added in build step (5)
+  # (optional) prometheus + grafana in a later step.
