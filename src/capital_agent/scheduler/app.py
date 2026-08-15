@@ -12,10 +12,12 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+from ..alerts import notify
 from ..health_api import build_health_app, serve_health
 from ..logging_config import configure as configure_logging
 from ..logging_config import get_logger
 from ..mcp_client import MCPClient, lifespan_mcp
+from ..risk import ensure_killswitch_row, get_policy
 from ..sessions import load_sessions
 from ..settings import get_settings
 from ..state import init_db
@@ -55,13 +57,15 @@ def build_scheduler(mcp: MCPClient, sessions) -> AsyncIOScheduler:
         id="daily_reset", replace_existing=True, max_instances=1, coalesce=True,
     )
 
-    # Read-only analysis on GOLD every 15 minutes (aligned to :00/:15/:30/:45).
-    # Session-gated inside the job — closed windows and guards are skipped.
+    # RSI mean-reversion on GOLD every 15 minutes (aligned :00/:15/:30/:45).
+    # Session-gated inside the job. Preflight + kill switch + cooldowns +
+    # postflight all live inside run_playbook_once via runner.py.
+    # CAP_DRY_RUN=true is enforced -- preview only, execute impossible.
     sched.add_job(
         run_analysis_job,
         CronTrigger(minute="0,15,30,45", timezone="UTC"),
-        args=["GOLD", sessions, "readonly_gold_15m"],
-        id="analysis_gold_15m", replace_existing=True, max_instances=1,
+        args=["GOLD", sessions, "rsi_mean_reversion"],
+        id="rsi_gold_15m", replace_existing=True, max_instances=1,
         coalesce=True, misfire_grace_time=120,
     )
     return sched
@@ -95,12 +99,19 @@ async def run() -> int:
              config_dir=str(settings.capital_agent_config_dir))
 
     await init_db(settings.capital_agent_state_dir)
+    await ensure_killswitch_row()
+    policy = get_policy(settings.capital_agent_config_dir)
     sessions = load_sessions(settings.capital_agent_config_dir / "sessions.yaml")
     allowlist = _load_allowlist(settings.capital_agent_config_dir / "allowlist.yaml")
     log.info("config.loaded",
              instruments=len(sessions.instruments),
              allowlist=allowlist,
-             session_edge_minutes=sessions.session_edge_minutes)
+             session_edge_minutes=sessions.session_edge_minutes,
+             dry_run=policy.dry_run,
+             risk_pct=policy.risk_pct_per_trade,
+             max_positions_total=policy.max_positions_total)
+    await notify("scheduler.starting",
+                 dry_run=policy.dry_run, allowlist=",".join(allowlist))
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -117,7 +128,8 @@ async def run() -> int:
         log.info("scheduler.started",
                  keepalive_s=settings.keepalive_interval_seconds,
                  reconcile_s=settings.reconciliation_interval_seconds,
-                 analysis_epic="GOLD", analysis_cron="0,15,30,45 * * * *")
+                 strategy="rsi_mean_reversion", epic="GOLD",
+                 cron="0,15,30,45 * * * *")
 
         # Health API
         app = build_health_app(mcp=mcp, sched=sched)
@@ -133,4 +145,5 @@ async def run() -> int:
             with contextlib.suppress(asyncio.CancelledError):
                 await health_task
     log.info("shutdown.done")
+    await notify("scheduler.stopped")
     return 0

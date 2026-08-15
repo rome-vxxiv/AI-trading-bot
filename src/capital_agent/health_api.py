@@ -18,8 +18,10 @@ from typing import Any
 from fastapi import Depends, FastAPI, Header, HTTPException
 from sqlalchemy import select
 
+from .alerts import notify
 from .logging_config import get_logger
 from .mcp_client import MCPClient
+from .risk import set_active as ks_set_active
 from .settings import get_settings
 from .state import KillSwitchRow, PositionsLocal
 from .state.db import session_scope
@@ -70,28 +72,14 @@ def build_health_app(mcp: MCPClient, sched) -> FastAPI:
 
     @app.post("/kill", dependencies=[Depends(_require_token)])
     async def kill(reason: str = "manual") -> dict[str, Any]:
-        async with session_scope() as s:
-            ks = await s.scalar(select(KillSwitchRow).where(KillSwitchRow.row_id == 1))
-            if ks is None:
-                raise HTTPException(500, "kill switch row missing")
-            ks.active = True
-            ks.reason = reason
-            ks.triggered_at = datetime.now(UTC).replace(tzinfo=None)
-            ks.cleared_at = None
-            await s.commit()
-        log.warning("kill_switch.activated", reason=reason)
+        await ks_set_active(True, reason)
+        await notify("kill_switch.activated", reason=reason)
         return {"ok": True, "active": True, "reason": reason}
 
     @app.post("/unlock", dependencies=[Depends(_require_token)])
     async def unlock() -> dict[str, Any]:
-        async with session_scope() as s:
-            ks = await s.scalar(select(KillSwitchRow).where(KillSwitchRow.row_id == 1))
-            if ks is None:
-                raise HTTPException(500, "kill switch row missing")
-            ks.active = False
-            ks.cleared_at = datetime.now(UTC).replace(tzinfo=None)
-            await s.commit()
-        log.warning("kill_switch.cleared")
+        await ks_set_active(False, "")
+        await notify("kill_switch.cleared")
         return {"ok": True, "active": False}
 
     return app

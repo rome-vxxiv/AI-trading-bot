@@ -76,7 +76,7 @@ async def test_skipped_on_saturday(monkeypatch):
     sessions = _gold_sessions()
     calls: list[str] = []
     monkeypatch.setattr(
-        "capital_agent.scheduler.jobs.analysis.run_analysis_once",
+        "capital_agent.scheduler.jobs.analysis.run_playbook_once",
         _fake_runner(calls),
     )
     monkeypatch.setattr(
@@ -94,7 +94,7 @@ async def test_fires_on_wed_noon(monkeypatch):
     sessions = _gold_sessions()
     calls: list[str] = []
     monkeypatch.setattr(
-        "capital_agent.scheduler.jobs.analysis.run_analysis_once",
+        "capital_agent.scheduler.jobs.analysis.run_playbook_once",
         _fake_runner(calls),
     )
     monkeypatch.setattr(
@@ -112,7 +112,7 @@ async def test_skipped_in_daily_guard(monkeypatch):
     sessions = _gold_sessions()
     calls: list[str] = []
     monkeypatch.setattr(
-        "capital_agent.scheduler.jobs.analysis.run_analysis_once",
+        "capital_agent.scheduler.jobs.analysis.run_playbook_once",
         _fake_runner(calls),
     )
     # Wed 21:15 UTC → inside DAILY 21:00-22:00 guard
@@ -128,9 +128,9 @@ async def test_skipped_in_daily_guard(monkeypatch):
 
 
 def _fake_runner(sink: list[str]):
-    async def _run(epic: str, strategy_id: str = "readonly_analysis"):
+    async def _run(strategy: str, epic: str):
         sink.append(epic)
-        return {"epic": epic, "verdict": "neutral", "reason": "test"}
+        return {"epic": epic, "verdict": "neutral", "decision": "hold", "reason": "test"}
     return _run
 
 

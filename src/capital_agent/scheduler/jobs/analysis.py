@@ -1,39 +1,37 @@
-"""Scheduler job: run the read-only analysis driver against one epic,
-respecting the instrument's session window and any DAILY guards.
-
-Skipped ticks are logged (analysis.skipped) so operators can see the
-session logic working without opening the DB. This is important for
-GOLD in particular — it's closed all weekend, so the first ~40 hours
-of a Saturday-morning start will be nothing but skips."""
+"""Scheduler job wrapper for playbook invocations. Session-gates first,
+then delegates to the parameterized runner in driver/runner.py.
+Preflight risk checks live inside the runner — kill switch, cooldowns,
+allowlist, and max-positions gate the LLM call itself.
+"""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from ...driver import run_analysis_once
+from ...driver import run_playbook_once
 from ...logging_config import get_logger
 from ...sessions import SessionsConfig, is_in_guard, is_open, next_open
 from ...sessions.window import within_edge_guard
-from ...state import KillSwitchRow
-from ...state.db import session_scope
 
 log = get_logger(__name__)
 
 
 async def run_analysis_job(epic: str, sessions: SessionsConfig, strategy_id: str) -> None:
-    now = datetime.now(UTC)
+    """Backwards-compat wrapper. `strategy_id` is used to pick the playbook."""
+    await _run_gated(epic=epic, sessions=sessions, strategy=strategy_id)
 
-    async with session_scope() as s:
-        from sqlalchemy import select
-        ks = await s.scalar(select(KillSwitchRow).where(KillSwitchRow.row_id == 1))
-        if ks is not None and ks.active:
-            log.info("analysis.skipped", epic=epic, reason="kill_switch_active",
-                     kill_reason=ks.reason)
-            return
+
+async def run_strategy_job(epic: str, sessions: SessionsConfig, strategy_id: str) -> None:
+    await _run_gated(epic=epic, sessions=sessions, strategy=strategy_id)
+
+
+async def _run_gated(*, epic: str, sessions: SessionsConfig, strategy: str) -> None:
+    now = datetime.now(UTC)
 
     sess = sessions.instruments.get(epic)
     if sess is None:
-        log.warning("analysis.skipped", epic=epic, reason="epic_not_in_sessions_yaml")
+        log.warning("job.skipped", epic=epic, strategy=strategy,
+                    reason="epic_not_in_sessions_yaml")
         return
 
     if not is_open(sess, now):
@@ -41,18 +39,23 @@ async def run_analysis_job(epic: str, sessions: SessionsConfig, strategy_id: str
             nxt = next_open(sess, now).isoformat()
         except Exception:  # noqa: BLE001
             nxt = "unknown"
-        log.info("analysis.skipped", epic=epic, reason="session_closed", next_open_at=nxt)
+        log.info("job.skipped", epic=epic, strategy=strategy,
+                 reason="session_closed", next_open_at=nxt)
         return
 
     if is_in_guard(sess.guards, now):
-        log.info("analysis.skipped", epic=epic, reason="in_daily_guard")
+        log.info("job.skipped", epic=epic, strategy=strategy,
+                 reason="in_daily_guard")
         return
 
     if within_edge_guard(sess, now, edge_minutes=sessions.session_edge_minutes):
-        log.info("analysis.skipped", epic=epic, reason="within_session_edge")
+        log.info("job.skipped", epic=epic, strategy=strategy,
+                 reason="within_session_edge")
         return
 
-    log.info("analysis.start", epic=epic, strategy_id=strategy_id)
-    verdict = await run_analysis_once(epic=epic, strategy_id=strategy_id)
+    log.info("job.start", epic=epic, strategy=strategy)
+    verdict = await run_playbook_once(strategy=strategy, epic=epic)
     if "_error" in verdict:
-        log.warning("analysis.error", epic=epic, error=verdict.get("_error"))
+        log.warning("job.error", epic=epic, strategy=strategy,
+                    error=verdict.get("_error"),
+                    reasons=verdict.get("reasons") or verdict.get("_message"))

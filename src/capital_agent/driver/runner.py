@@ -1,17 +1,22 @@
-"""Parameterized playbook runner. One code path for every strategy —
-each strategy is a (prompt_file, allowed_tools, denied_tools, strategy_id)
-tuple. Callers use `run_playbook_once("rsi_mean_reversion", epic)`.
+"""Parameterized playbook runner. One code path for every strategy.
 
-Trading-tool safety layers, still all three:
-1. `--allowedTools` whitelists exactly what each strategy needs.
-2. `--disallowedTools` explicitly denies execute even when Claude Code
-   might otherwise pick up a tool.
-3. `CAP_DRY_RUN=true` in .env makes the MCP server itself refuse every
-   execute call regardless of what our driver sent.
+Flow (step 5+):
+  1. Load risk policy from config/risk.yaml.
+  2. Preflight: kill switch, allowlist, max positions, cooldowns.
+     Reject early with a Telegram alert if any check fails; no LLM call.
+  3. If the playbook is a strategy (not read-only), fetch bars via
+     the persistent MCPClient and pre-compute RSI/ATR in Python.
+     Write pre-computed values to state/tick-context.json.
+  4. Spawn Claude Code via stdin, allowedTools whitelist + disallowedTools
+     denylist. Add `Read` to allowedTools for strategies so the LLM can
+     read tick-context.json.
+  5. Parse verdict. Postflight-validate any preview response.
+  6. Save Signal, emit alert on non-hold decisions and on any rejection.
 
-The runner also refuses to spawn the strategy if `CAP_DRY_RUN` is false
-AND the strategy is marked `require_dry_run: True` — an accidental
-config flip can't send a step-4 strategy to production.
+Triple-layer trade safety (unchanged from step 4):
+  - --allowedTools whitelist
+  - --disallowedTools blocklist
+  - CAP_DRY_RUN=true at the MCP layer
 """
 
 from __future__ import annotations
@@ -20,24 +25,29 @@ import asyncio
 import json
 import os
 import sys as _sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ..alerts import notify
 from ..logging_config import get_logger
+from ..mcp_client import MCPClient, lifespan_mcp
+from ..risk import (
+    RiskPolicy,
+    ensure_killswitch_row,
+    get_policy,
+    postflight,
+    preflight,
+)
 from ..settings import get_settings
-from ..state import Signal
+from ..state import Signal, init_db
 from ..state.db import session_scope
+from ..strategy import prepare_tick_context
 
 log = get_logger(__name__)
 
-# ------------------------------------------------------------------
-# Playbook registry
-# ------------------------------------------------------------------
 
-# Trading tools are ALWAYS denied at the driver level, even when a
-# playbook doesn't need trading — belt over the strategy allowlist.
 COMMON_DENIED = [
     "mcp__capital-com__cap_trade_execute_position",
     "mcp__capital-com__cap_trade_execute_working_order",
@@ -53,7 +63,10 @@ class PlaybookSpec:
     prompt_file: str
     allowed_tools: tuple[str, ...]
     denied_tools: tuple[str, ...] = ()
-    require_dry_run: bool = False   # step 4 defaults; step 6 flips off
+    require_dry_run: bool = False
+    needs_preflight_context: bool = False    # Python-side indicators?
+    resolution: str = "MINUTE_15"
+    max_bars: int = 60
 
     @property
     def allowed_csv(self) -> str:
@@ -72,7 +85,6 @@ PLAYBOOKS: dict[str, PlaybookSpec] = {
             "mcp__capital-com__cap_market_prices",
             "mcp__capital-com__cap_market_sentiment",
         ),
-        # Extra deny even the preview tools — this playbook is read-only.
         denied_tools=(
             "mcp__capital-com__cap_trade_preview_position",
             "mcp__capital-com__cap_trade_preview_working_order",
@@ -83,18 +95,17 @@ PLAYBOOKS: dict[str, PlaybookSpec] = {
         strategy_id="rsi_mean_reversion",
         prompt_file="prompts/rsi_mean_reversion.md",
         allowed_tools=(
-            "mcp__capital-com__cap_market_prices",
-            "mcp__capital-com__cap_market_sentiment",
+            "Read",
             "mcp__capital-com__cap_trade_preview_position",
         ),
-        # No extra denies here; COMMON_DENIED already blocks execute.
         require_dry_run=True,
+        needs_preflight_context=True,
+        resolution="MINUTE_15",
+        max_bars=60,
     ),
 }
 
 
-# ------------------------------------------------------------------
-# Driver
 # ------------------------------------------------------------------
 
 
@@ -111,13 +122,23 @@ async def run_playbook_once(strategy: str, epic: str) -> dict[str, Any]:
         return {"_error": "dry_run_required"}
 
     settings = get_settings()
+    await init_db(settings.capital_agent_state_dir)
+    await ensure_killswitch_row()
+    policy = get_policy(settings.capital_agent_config_dir)
+
+    # ---------------- Pre-flight risk checks ---------------------
+    pre = await preflight(epic=epic, strategy_id=strategy, policy=policy)
+    if not pre.ok:
+        await notify("playbook.rejected", strategy=strategy, epic=epic,
+                     reasons=";".join(pre.reasons)[:200])
+        return {"_error": "preflight_rejected", "reasons": pre.reasons,
+                "fields": pre.fields}
+
+    # ---------------- Prompt + Claude binary ---------------------
     prompt_path = Path(spec.prompt_file)
     if not prompt_path.exists():
         log.error("playbook.missing_prompt", strategy=strategy, path=str(prompt_path))
         return {"_error": "missing_prompt"}
-
-    _write_tick_context(epic=epic, strategy=strategy,
-                        state_dir=settings.capital_agent_state_dir)
     prompt = prompt_path.read_text(encoding="utf-8").replace("{EPIC}", epic)
 
     claude_bin = _resolve_claude_binary()
@@ -130,13 +151,27 @@ async def run_playbook_once(strategy: str, epic: str) -> dict[str, Any]:
 
     await _ensure_mcp_registered(claude_bin)
 
+    # ---------------- Python pre-compute -------------------------
+    ctx = None
+    if spec.needs_preflight_context:
+        async with lifespan_mcp() as mcp:
+            balance = await _fetch_active_balance(mcp)
+            ctx = await prepare_tick_context(
+                mcp=mcp, epic=epic, strategy_id=strategy,
+                resolution=spec.resolution, max_bars=spec.max_bars,
+                state_dir=settings.capital_agent_state_dir,
+                account_balance=balance, policy=policy,
+            )
+        if ctx is None:
+            return {"_error": "preflight_context_failed"}
+
+    # ---------------- Spawn Claude -------------------------------
     args = [
         claude_bin, "-p",
         "--allowedTools", spec.allowed_csv,
         "--disallowedTools", spec.denied_csv,
         "--max-turns", "15",
     ]
-
     started = datetime.now(UTC)
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -149,14 +184,15 @@ async def run_playbook_once(strategy: str, epic: str) -> dict[str, Any]:
         )
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(input=prompt.encode("utf-8")),
-            timeout=240,
+            timeout=180,
         )
     except TimeoutError:
         log.error("playbook.timeout", strategy=strategy, epic=epic)
+        await notify("playbook.timeout", strategy=strategy, epic=epic)
         return {"_error": "timeout"}
     except Exception as exc:  # noqa: BLE001
-        log.error("playbook.spawn_error", strategy=strategy,
-                  epic=epic, error=str(exc)[:200])
+        log.error("playbook.spawn_error", strategy=strategy, epic=epic,
+                  error=str(exc)[:200])
         return {"_error": "spawn_error", "_message": str(exc)[:200]}
 
     latency_ms = int((datetime.now(UTC) - started).total_seconds() * 1000)
@@ -167,28 +203,73 @@ async def run_playbook_once(strategy: str, epic: str) -> dict[str, Any]:
         log.error("playbook.nonzero_exit", strategy=strategy, epic=epic,
                   code=proc.returncode, stderr=stderr_s[:400],
                   stdout_tail=stdout_s[-400:])
+        await notify("playbook.nonzero_exit", strategy=strategy, epic=epic,
+                     code=proc.returncode)
         return {"_error": "nonzero_exit", "_code": proc.returncode}
 
     verdict = _extract_verdict_json(stdout_s)
     if verdict is None:
         log.warning("playbook.parse_error", strategy=strategy, epic=epic,
                     stdout_tail=stdout_s[-500:])
+        await notify("playbook.parse_error", strategy=strategy, epic=epic)
         return {"_error": "parse_error"}
 
     verdict.setdefault("epic", epic)
     verdict["_latency_ms"] = latency_ms
     verdict["_strategy_id"] = strategy
+
+    # ---------------- Post-flight validation ---------------------
+    atr_used = None
+    if isinstance(verdict.get("atr_14"), int | float):
+        atr_used = float(verdict["atr_14"])
+    elif ctx is not None:
+        atr_used = ctx.get("atr_14")
+
+    post = postflight(verdict, policy, atr_used=atr_used)
+    verdict["_postflight_ok"] = post.ok
+    verdict["_postflight_reasons"] = post.reasons
+
     await _save_signal(strategy_id=strategy, epic=epic, verdict=verdict)
-    log.info("playbook.ok", strategy=strategy, epic=epic,
-             decision=verdict.get("decision") or verdict.get("verdict"),
-             preview_id=verdict.get("preview_id"),
+
+    decision = verdict.get("decision") or verdict.get("verdict") or "hold"
+    log.info("playbook.ok", strategy=strategy, epic=epic, decision=decision,
+             preview_id=verdict.get("preview_id"), postflight_ok=post.ok,
              latency_ms=latency_ms)
+
+    if decision != "hold":
+        await notify("playbook.decision", strategy=strategy, epic=epic,
+                     decision=decision,
+                     preview_id=str(verdict.get("preview_id"))[:16],
+                     postflight_ok=post.ok, latency_ms=latency_ms)
     return verdict
 
 
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+
+async def _fetch_active_balance(mcp: MCPClient) -> float | None:
+    try:
+        accts = await mcp.call("cap_account_list", timeout_s=10)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("balance.fetch_error", error=str(exc)[:200])
+        return None
+    if not isinstance(accts, dict):
+        return None
+    active_id = accts.get("active_account_id")
+    for a in (accts.get("accounts") or []):
+        if isinstance(a, dict) and (a.get("accountId") == active_id or a.get("preferred")):
+            bal = (a.get("balance") or {}).get("balance")
+            if isinstance(bal, int | float):
+                return float(bal)
+    # Fallback to any first account.
+    for a in (accts.get("accounts") or []):
+        if isinstance(a, dict):
+            bal = (a.get("balance") or {}).get("balance")
+            if isinstance(bal, int | float):
+                return float(bal)
+    return None
 
 
 async def _ensure_mcp_registered(claude_bin: str) -> None:
@@ -227,15 +308,6 @@ def _resolve_claude_binary() -> str | None:
             if p:
                 return p
     return which("claude")
-
-
-def _write_tick_context(epic: str, strategy: str, state_dir: Path) -> None:
-    state_dir.mkdir(parents=True, exist_ok=True)
-    ctx = {"epic": epic, "strategy": strategy,
-           "ts_utc": datetime.now(UTC).isoformat(),
-           "dry_run": os.environ.get("CAP_DRY_RUN", "false")}
-    (state_dir / "tick-context.json").write_text(
-        json.dumps(ctx, indent=2), encoding="utf-8")
 
 
 def _iter_balanced_json_objects(s: str):
