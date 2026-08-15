@@ -134,7 +134,7 @@ async def run_playbook_once(strategy: str, epic: str) -> dict[str, Any]:
         claude_bin, "-p",
         "--allowedTools", spec.allowed_csv,
         "--disallowedTools", spec.denied_csv,
-        "--max-turns", "10",
+        "--max-turns", "15",
     ]
 
     started = datetime.now(UTC)

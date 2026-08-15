@@ -1,6 +1,6 @@
 Analyze {EPIC} on Capital.com and, if the RSI signal fires, PREVIEW a trade (do NOT execute). Follow these steps in order and then stop.
 
-Step 1: Call mcp__capital-com__cap_market_prices with epic {EPIC}, resolution MINUTE_15, max 200. Use the returned candles' closePrice.bid, highPrice.bid, lowPrice.bid.
+Step 1: Call mcp__capital-com__cap_market_prices with epic {EPIC}, resolution MINUTE_15, max 60. Use the returned candles' closePrice.bid, highPrice.bid, lowPrice.bid.
 
 Step 2: Compute RSI-14 using Wilder smoothing on the closes. Formula (this must match the backtest bar-for-bar):
 - For each i from 1 upward, gain_i = max(close_i - close_{i-1}, 0), loss_i = max(close_{i-1} - close_i, 0)
