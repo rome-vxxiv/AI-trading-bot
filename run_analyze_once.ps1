@@ -1,5 +1,5 @@
 # ==============================================================
-# One-shot analysis launcher (Windows) — fires the read-only Claude Code
+# One-shot analysis launcher (Windows) - fires the read-only Claude Code
 # analysis against $epic ignoring session gating. Handy for testing when
 # markets are closed (e.g. GOLD on weekends).
 #
@@ -20,7 +20,7 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
     Read-Host "Press Enter to close"; exit 1
 }
 if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
-    Write-Host "[X] claude CLI not on PATH. Run run_scheduler.ps1 first — it installs Claude Code." -ForegroundColor Red
+    Write-Host "[X] claude CLI not on PATH. Run run_scheduler.ps1 first - it installs Claude Code." -ForegroundColor Red
     Read-Host "Press Enter to close"; exit 1
 }
 

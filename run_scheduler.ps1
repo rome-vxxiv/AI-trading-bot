@@ -45,7 +45,7 @@ if (-not $claude -and -not $node) {
     Write-Host "[!] Claude Code CLI is not installed, and Node.js (needed to install it) is missing." -ForegroundColor Yellow
     Write-Host "    Install Node.js LTS from https://nodejs.org/ (default options are fine)." -ForegroundColor Yellow
     Write-Host "    Then re-run this script and it will install Claude Code for you." -ForegroundColor Yellow
-    Write-Host "    You can still start the scheduler now — the analysis job will log" -ForegroundColor Yellow
+    Write-Host "    You can still start the scheduler now - the analysis job will log" -ForegroundColor Yellow
     Write-Host "    analysis.error events but keepalive + reconcile will run fine." -ForegroundColor Yellow
     Write-Host ""
 }
