@@ -98,8 +98,28 @@ def build_health_app(mcp: MCPClient, sched) -> FastAPI:
 
 
 async def serve_health(app: FastAPI, host: str, port: int) -> None:
+    """Serve the health API. If the port is busy, log and give up gracefully
+    without killing the scheduler — a stale process is not a reason to lose
+    keepalive + reconcile."""
+    import socket
+
     import uvicorn
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind((host, port))
+    except OSError as exc:
+        log.warning("health_api.port_in_use",
+                    host=host, port=port, error=str(exc),
+                    hint="another scheduler may still be running; check for stray python.exe")
+        return
+    finally:
+        probe.close()
+
     config = uvicorn.Config(app, host=host, port=port, log_level="warning",
                             access_log=False, lifespan="off")
     server = uvicorn.Server(config)
-    await server.serve()
+    try:
+        await server.serve()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("health_api.server_error", error=str(exc)[:200])
