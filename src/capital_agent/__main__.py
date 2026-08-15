@@ -20,14 +20,21 @@ load_dotenv()
 def main() -> int:
     parser = argparse.ArgumentParser(prog="capital-agent")
     parser.add_argument("command", nargs="?", default="run",
-                        choices=("run", "status", "analyze-once"),
-                        help="run = start scheduler; status = one-shot session "
-                             "probe; analyze-once = fire the analysis driver "
-                             "against --epic ignoring session gating")
+                        choices=("run", "status", "analyze-once",
+                                 "strategy-once", "backtest"),
+                        help="run | status | analyze-once (read-only) | "
+                             "strategy-once (preview flow, needs CAP_DRY_RUN=true) | "
+                             "backtest (replay strategy on historical bars)")
     parser.add_argument("--epic", default="GOLD",
-                        help="Epic for analyze-once (default: GOLD)")
-    parser.add_argument("--strategy", default="readonly_manual",
-                        help="Strategy id label recorded in the signals table")
+                        help="Epic for analyze/strategy/backtest (default: GOLD)")
+    parser.add_argument("--strategy", default="rsi_mean_reversion",
+                        help="Playbook id (see driver.PLAYBOOKS)")
+    parser.add_argument("--resolution", default="MINUTE_15",
+                        help="Backtest bar resolution")
+    parser.add_argument("--max-bars", type=int, default=400,
+                        help="Backtest bar count")
+    parser.add_argument("--from-iso", default=None)
+    parser.add_argument("--to-iso", default=None)
     args = parser.parse_args()
 
     if args.command == "run":
@@ -41,7 +48,7 @@ def main() -> int:
         return asyncio.run(status_once())
 
     if args.command == "analyze-once":
-        from .driver import run_analysis_once
+        from .driver import run_playbook_once
         from .logging_config import configure as configure_logging
         from .settings import get_settings
         from .state import init_db
@@ -50,12 +57,43 @@ def main() -> int:
             settings = get_settings()
             configure_logging(settings.capital_agent_log_dir)
             await init_db(settings.capital_agent_state_dir)
-            verdict = await run_analysis_once(epic=args.epic, strategy_id=args.strategy)
+            verdict = await run_playbook_once("readonly_analysis", args.epic)
             print("\n---- verdict ----")
             print(verdict)
             return 0 if "_error" not in verdict else 2
 
         return asyncio.run(_once())
+
+    if args.command == "strategy-once":
+        from .driver import run_playbook_once
+        from .logging_config import configure as configure_logging
+        from .settings import get_settings
+        from .state import init_db
+
+        async def _strategy() -> int:
+            settings = get_settings()
+            configure_logging(settings.capital_agent_log_dir)
+            await init_db(settings.capital_agent_state_dir)
+            verdict = await run_playbook_once(args.strategy, args.epic)
+            print("\n---- verdict ----")
+            print(verdict)
+            return 0 if "_error" not in verdict else 2
+
+        return asyncio.run(_strategy())
+
+    if args.command == "backtest":
+        from .backtest.runner import run_backtest
+        from .logging_config import configure as configure_logging
+        from .settings import get_settings
+
+        async def _bt() -> int:
+            configure_logging(get_settings().capital_agent_log_dir)
+            await run_backtest(epic=args.epic, resolution=args.resolution,
+                               max_bars=args.max_bars,
+                               from_iso=args.from_iso, to_iso=args.to_iso)
+            return 0
+
+        return asyncio.run(_bt())
 
     return 1
 

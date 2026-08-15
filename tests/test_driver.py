@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from capital_agent.driver.analysis import _extract_verdict_json, _greedy_scan
+from capital_agent.driver.runner import _extract_verdict_json, _greedy_scan
 from capital_agent.scheduler.jobs.analysis import run_analysis_job
 from capital_agent.sessions.parser import Guard, InstrumentSession, SessionsConfig, WeekdayTime
 
