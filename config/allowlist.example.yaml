@@ -2,8 +2,8 @@
 # scheduler's authoritative view — the driver refuses to trade an epic
 # absent here even if the MCP server would accept it.
 epics:
-  - BTCUSD    # only symbol enabled in first-run defaults
+  - BTCUSD    # crypto reference
+  - GOLD      # analysis job runs against this in step 3
 # - ETHUSD
-# - GOLD
 # - EURUSD
 # - US500

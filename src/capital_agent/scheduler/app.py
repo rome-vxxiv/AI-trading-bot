@@ -19,6 +19,7 @@ from ..mcp_client import MCPClient, lifespan_mcp
 from ..sessions import load_sessions
 from ..settings import get_settings
 from ..state import init_db
+from .jobs.analysis import run_analysis_job
 from .jobs.daily_reset import run_daily_reset
 from .jobs.keepalive import run_keepalive
 from .jobs.reconcile import run_reconcile
@@ -35,7 +36,7 @@ def _load_allowlist(path: Path) -> list[str]:
     return [str(e).strip() for e in (raw.get("epics") or []) if str(e).strip()]
 
 
-def build_scheduler(mcp: MCPClient) -> AsyncIOScheduler:
+def build_scheduler(mcp: MCPClient, sessions) -> AsyncIOScheduler:
     s = get_settings()
     sched = AsyncIOScheduler(timezone="UTC")
 
@@ -52,6 +53,16 @@ def build_scheduler(mcp: MCPClient) -> AsyncIOScheduler:
     sched.add_job(
         run_daily_reset, CronTrigger(hour=0, minute=0, timezone="UTC"),
         id="daily_reset", replace_existing=True, max_instances=1, coalesce=True,
+    )
+
+    # Read-only analysis on GOLD every 15 minutes (aligned to :00/:15/:30/:45).
+    # Session-gated inside the job — closed windows and guards are skipped.
+    sched.add_job(
+        run_analysis_job,
+        CronTrigger(minute="0,15,30,45", timezone="UTC"),
+        args=["GOLD", sessions, "readonly_gold_15m"],
+        id="analysis_gold_15m", replace_existing=True, max_instances=1,
+        coalesce=True, misfire_grace_time=120,
     )
     return sched
 
@@ -101,11 +112,12 @@ async def run() -> int:
         log.info("mcp.tools_ready", count=len(tools))
         await audit_sessions(mcp, sessions, allowlist)
 
-        sched = build_scheduler(mcp)
+        sched = build_scheduler(mcp, sessions)
         sched.start()
         log.info("scheduler.started",
                  keepalive_s=settings.keepalive_interval_seconds,
-                 reconcile_s=settings.reconciliation_interval_seconds)
+                 reconcile_s=settings.reconciliation_interval_seconds,
+                 analysis_epic="GOLD", analysis_cron="0,15,30,45 * * * *")
 
         # Health API
         app = build_health_app(mcp=mcp, sched=sched)

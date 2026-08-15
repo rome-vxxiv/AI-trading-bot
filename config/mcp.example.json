@@ -1,16 +1,9 @@
 {
-  "_comment": "Claude Code MCP config for capital-mcp. Copy to config/mcp.json and adjust the command/args to match your install method (docker-exec, uvx, or local venv). CAP_* env is inherited from the calling shell; do not embed secrets here.",
+  "_comment": "MCP config consumed by `claude -p --mcp-config config/mcp.json`. On Windows, keep .venv\\Scripts\\python.exe; on Linux/macOS, .venv/bin/python. CAP_* is read from the calling shell's environment (populated from .env by our launcher). Never embed secrets here.",
   "mcpServers": {
     "capital-com": {
-      "command": "docker",
-      "args": [
-        "exec",
-        "-i",
-        "capital-mcp",
-        "python",
-        "-m",
-        "capital_mcp"
-      ]
+      "command": ".venv\\Scripts\\python.exe",
+      "args": ["-m", "capital_mcp"]
     }
   }
 }
