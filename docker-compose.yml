@@ -1,22 +1,35 @@
-# Full-stack compose. `capital-mcp` builds from a pinned upstream tag so
-# we track upstream via `docker compose pull && up -d` without forking.
-# scheduler / driver / health services will be added as they are built.
+# Full-stack compose. The scheduler container spawns capital-mcp as an
+# in-process stdio subprocess, so there's no separate MCP service —
+# simpler than the initial scaffold suggested.
+#
+# Usage on a VPS:
+#   cp .env.example .env && $EDITOR .env           # fill CAP_* + ANTHROPIC_API_KEY
+#   cp config/*.example.yaml config/               # rename examples to live
+#   docker compose build
+#   docker compose up -d
+#   docker compose logs -f agent                   # follow structured JSON events
+#   curl http://127.0.0.1:8080/healthz            # sanity ping
 
 services:
 
-  capital-mcp:
+  agent:
     build:
-      context: ./docker/capital-mcp
-      # UPSTREAM_REF is a tag or commit sha from capital-com-sv/capital-mcp.
+      context: .
+      dockerfile: docker/agent/Dockerfile
       args:
         UPSTREAM_REF: main
-    container_name: capital-mcp
+    container_name: capital-agent
     env_file: .env
     restart: unless-stopped
-    # No ports published: the scheduler / driver reach the server over
-    # `docker exec -i capital-mcp python -m capital_mcp` via stdio, per
-    # the Claude Code mcp.json.
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - agent_state:/app/state
+      - agent_logs:/app/logs
+      # Mount config live so risk.yaml edits pick up without rebuild.
+      - ./config:/app/config:ro
+      - ./prompts:/app/prompts:ro
 
-  # scheduler:        # to be added in build step (2)
-  # health-api:       # to be added in build step (5)
-  # (optional) prometheus + grafana in a later step.
+volumes:
+  agent_state:
+  agent_logs:

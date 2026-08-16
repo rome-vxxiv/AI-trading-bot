@@ -1,0 +1,44 @@
+# Bare-metal systemd unit for capital-agent. Install to
+# /etc/systemd/system/capital-agent.service, then:
+#   systemctl daemon-reload
+#   systemctl enable --now capital-agent
+#   journalctl -u capital-agent -f
+#
+# Assumes an unprivileged user `capital` owns /opt/capital-agent and a
+# venv at /opt/capital-agent/.venv. Adjust WorkingDirectory + User to
+# match your deploy.
+
+[Unit]
+Description=capital-agent scheduler (Capital.com MCP driver)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=capital
+Group=capital
+WorkingDirectory=/opt/capital-agent
+EnvironmentFile=/opt/capital-agent/.env
+ExecStart=/opt/capital-agent/.venv/bin/python -m capital_agent run
+Restart=on-failure
+RestartSec=10s
+# Log to journal AND to the agent's own logs/agent.jsonl.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=capital-agent
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/capital-agent/state /opt/capital-agent/logs
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=false   # relaxed for FastMCP's JIT paths
+
+[Install]
+WantedBy=multi-user.target

@@ -22,10 +22,10 @@ def main() -> int:
     parser.add_argument("command", nargs="?", default="run",
                         choices=("run", "status", "analyze-once",
                                  "strategy-once", "backtest",
-                                 "go-live", "go-demo"),
+                                 "go-live", "go-demo",
+                                 "kill", "unlock", "jobs"),
                         help="run | status | analyze-once | strategy-once | "
-                             "backtest | go-live (flip .env fuses ON) | "
-                             "go-demo (flip fuses OFF)")
+                             "backtest | go-live | go-demo | kill | unlock | jobs")
     parser.add_argument("--epic", default="GOLD",
                         help="Epic for analyze/strategy/backtest (default: GOLD)")
     parser.add_argument("--strategy", default="rsi_mean_reversion",
@@ -101,7 +101,52 @@ def main() -> int:
     if args.command in ("go-live", "go-demo"):
         return _flip_env(target=args.command, skip_prompt=args.confirm)
 
+    if args.command in ("kill", "unlock", "jobs"):
+        return _health_cli(args.command)
+
     return 1
+
+
+def _health_cli(cmd: str) -> int:
+    """kill/unlock/jobs subcommands hit the health API on 127.0.0.1:8080."""
+    import json
+    import os as _os
+    from urllib.error import HTTPError, URLError
+    from urllib.request import Request, urlopen
+
+    bind = _os.environ.get("HEALTH_API_BIND", "127.0.0.1:8080")
+    token = _os.environ.get("HEALTH_API_TOKEN", "")
+    if cmd == "jobs":
+        try:
+            with urlopen(f"http://{bind}/jobs", timeout=5) as r:
+                print(r.read().decode("utf-8"))
+        except (HTTPError, URLError, TimeoutError) as e:
+            print(f"[X] cannot reach scheduler at http://{bind}: {e}")
+            return 2
+        return 0
+
+    if cmd in ("kill", "unlock"):
+        if not token:
+            print("[X] HEALTH_API_TOKEN not set — required for kill/unlock")
+            return 2
+        url = f"http://{bind}/{cmd}"
+        if cmd == "kill":
+            url += "?reason=cli"
+        req = Request(url, method="POST",
+                      headers={"X-Auth-Token": token})
+        try:
+            with urlopen(req, timeout=5) as r:
+                print(r.read().decode("utf-8"))
+        except HTTPError as e:
+            print(f"[X] HTTP {e.code}: {e.read().decode('utf-8')}")
+            return 2
+        except (URLError, TimeoutError) as e:
+            print(f"[X] cannot reach scheduler at http://{bind}: {e}")
+            return 2
+        return 0
+
+    _ = json  # keep import used across branches
+    return 2
 
 
 def _flip_env(*, target: str, skip_prompt: bool) -> int:

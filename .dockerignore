@@ -1,0 +1,14 @@
+.git
+.venv
+state
+logs
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+capital_agent.egg-info
+.env
+*.zip
+install_step*.ps1
+install_step*.txt
