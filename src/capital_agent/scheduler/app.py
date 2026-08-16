@@ -23,6 +23,7 @@ from ..settings import get_settings
 from ..state import init_db
 from .jobs.analysis import run_analysis_job
 from .jobs.daily_reset import run_daily_reset
+from .jobs.drawdown import run_drawdown_check
 from .jobs.keepalive import run_keepalive
 from .jobs.reconcile import run_reconcile
 from .jobs.session_reconcile import audit_sessions
@@ -55,6 +56,13 @@ def build_scheduler(mcp: MCPClient, sessions) -> AsyncIOScheduler:
     sched.add_job(
         run_daily_reset, CronTrigger(hour=0, minute=0, timezone="UTC"),
         id="daily_reset", replace_existing=True, max_instances=1, coalesce=True,
+    )
+    # Equity snapshot + drawdown check every 60 s. Auto-triggers the
+    # kill switch on drawdown breach and alerts on daily-loss-cap breach.
+    sched.add_job(
+        run_drawdown_check, IntervalTrigger(seconds=60),
+        args=[mcp], id="drawdown", replace_existing=True, max_instances=1,
+        coalesce=True,
     )
 
     # RSI mean-reversion on GOLD every 15 minutes (aligned :00/:15/:30/:45).

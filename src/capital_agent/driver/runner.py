@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from ..alerts import notify
+from ..execute import execute_preview
 from ..logging_config import get_logger
 from ..mcp_client import MCPClient, lifespan_mcp
 from ..risk import (
@@ -41,7 +42,7 @@ from ..risk import (
     preflight,
 )
 from ..settings import get_settings
-from ..state import Signal, init_db
+from ..state import PositionsLocal, Signal, init_db
 from ..state.db import session_scope
 from ..strategy import prepare_tick_context
 
@@ -67,6 +68,9 @@ class PlaybookSpec:
     needs_preflight_context: bool = False    # Python-side indicators?
     resolution: str = "MINUTE_15"
     max_bars: int = 60
+    # Live-mode-only fields.
+    executes_after_preview: bool = False     # Python calls execute after Claude's preview
+    require_live_fuse: bool = False          # I_UNDERSTAND_LIVE_RISK=YES required
 
     @property
     def allowed_csv(self) -> str:
@@ -103,6 +107,22 @@ PLAYBOOKS: dict[str, PlaybookSpec] = {
         resolution="MINUTE_15",
         max_bars=60,
     ),
+    # Step-6 live variant. Same playbook prompt — Claude still only
+    # PREVIEWS. Python calls execute after our postflight approves.
+    "rsi_mean_reversion_live": PlaybookSpec(
+        strategy_id="rsi_mean_reversion_live",
+        prompt_file="prompts/rsi_mean_reversion.md",
+        allowed_tools=(
+            "Read",
+            "mcp__capital-com__cap_trade_preview_position",
+        ),
+        require_dry_run=False,          # CAP_DRY_RUN must be "false"
+        require_live_fuse=True,         # I_UNDERSTAND_LIVE_RISK must be "YES"
+        needs_preflight_context=True,
+        executes_after_preview=True,
+        resolution="MINUTE_15",
+        max_bars=60,
+    ),
 }
 
 
@@ -120,6 +140,17 @@ async def run_playbook_once(strategy: str, epic: str) -> dict[str, Any]:
         log.error("playbook.dry_run_required", strategy=strategy,
                   hint="set CAP_DRY_RUN=true in .env")
         return {"_error": "dry_run_required"}
+    if spec.require_live_fuse:
+        if os.environ.get("CAP_DRY_RUN", "").lower() == "true":
+            log.error("playbook.live_needs_dry_run_off", strategy=strategy,
+                      hint="live strategy runs need CAP_DRY_RUN=false")
+            return {"_error": "live_needs_dry_run_off"}
+        if os.environ.get("I_UNDERSTAND_LIVE_RISK", "NO") != "YES":
+            log.error("playbook.live_fuse_missing", strategy=strategy,
+                      hint="set I_UNDERSTAND_LIVE_RISK=YES in .env only after go-live ceremony")
+            return {"_error": "live_fuse_missing"}
+        log.warning("playbook.LIVE_MODE_ACTIVE", strategy=strategy,
+                    hint="Real orders WILL be placed if signal fires and postflight passes")
 
     settings = get_settings()
     await init_db(settings.capital_agent_state_dir)
@@ -229,11 +260,37 @@ async def run_playbook_once(strategy: str, epic: str) -> dict[str, Any]:
     verdict["_postflight_ok"] = post.ok
     verdict["_postflight_reasons"] = post.reasons
 
+    decision = verdict.get("decision") or verdict.get("verdict") or "hold"
+
+    # ---------------- Execute (LIVE ONLY) ------------------------
+    # Only fired when the spec is a live variant AND postflight approved
+    # AND the model returned a real preview_id AND decision != hold.
+    if (spec.executes_after_preview and post.ok
+            and decision in ("enter_long", "enter_short")
+            and verdict.get("preview_id")):
+        async with lifespan_mcp() as exec_mcp:
+            exec_result = await execute_preview(exec_mcp,
+                                                preview_id=str(verdict["preview_id"]))
+        verdict["_execute"] = exec_result
+        if exec_result.get("ok"):
+            await _record_new_position(
+                deal_id=exec_result.get("deal_id") or exec_result.get("deal_reference") or "",
+                epic=epic, decision=decision, verdict=verdict,
+                strategy_id=strategy, atr_used=atr_used, ctx=ctx,
+            )
+            await notify("execute.ok", strategy=strategy, epic=epic,
+                         deal_id=str(exec_result.get("deal_id"))[:12],
+                         decision=decision, latency_ms=latency_ms)
+        else:
+            await notify("execute.failed", strategy=strategy, epic=epic,
+                         status=exec_result.get("status"),
+                         reason=str(exec_result.get("reason") or "")[:120])
+
     await _save_signal(strategy_id=strategy, epic=epic, verdict=verdict)
 
-    decision = verdict.get("decision") or verdict.get("verdict") or "hold"
     log.info("playbook.ok", strategy=strategy, epic=epic, decision=decision,
              preview_id=verdict.get("preview_id"), postflight_ok=post.ok,
+             executed=bool(verdict.get("_execute", {}).get("ok")),
              latency_ms=latency_ms)
 
     if decision != "hold":
@@ -242,6 +299,37 @@ async def run_playbook_once(strategy: str, epic: str) -> dict[str, Any]:
                      preview_id=str(verdict.get("preview_id"))[:16],
                      postflight_ok=post.ok, latency_ms=latency_ms)
     return verdict
+
+
+async def _record_new_position(*, deal_id: str, epic: str, decision: str,
+                               verdict: dict, strategy_id: str,
+                               atr_used: float | None, ctx: dict | None) -> None:
+    """Insert a PositionsLocal row for the newly-opened position so
+    reconcile can track it and outcome_tagger can tag P&L when it closes."""
+    if not deal_id:
+        log.warning("record.no_deal_id", verdict=str(verdict)[:200])
+        return
+    direction = "BUY" if decision == "enter_long" else "SELL"
+    entry = (ctx or {}).get("last_close") or 0.0
+    stop = None
+    tp = None
+    if ctx:
+        sd = ctx.get("stop_distance")
+        pd = ctx.get("profit_distance")
+        if isinstance(sd, int | float) and entry:
+            stop = entry - sd if direction == "BUY" else entry + sd
+        if isinstance(pd, int | float) and entry:
+            tp = entry + pd if direction == "BUY" else entry - pd
+    async with session_scope() as s:
+        s.add(PositionsLocal(
+            deal_id=deal_id, epic=epic, direction=direction,
+            size=float((ctx or {}).get("suggested_size") or 0.0),
+            entry=float(entry), stop=stop, tp=tp,
+            strategy_id=strategy_id,
+        ))
+        await s.commit()
+    log.info("position.recorded", deal_id=deal_id, epic=epic,
+             direction=direction, entry=entry, stop=stop, tp=tp)
 
 
 # ------------------------------------------------------------------

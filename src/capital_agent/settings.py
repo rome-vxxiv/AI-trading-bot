@@ -25,6 +25,9 @@ class AgentSettings(BaseSettings):
     )
 
     # ---- Live-trading fuse (belt over the MCP's own gate) -----------
+    # Must be exactly the string "YES" for any playbook with
+    # require_live_fuse=True to spawn. Belt over CAP_DRY_RUN which the
+    # MCP also enforces. Both must line up before an execute happens.
     i_understand_live_risk: str = Field(default="NO")
 
     # ---- Alerts ------------------------------------------------------

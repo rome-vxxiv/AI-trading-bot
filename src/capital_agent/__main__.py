@@ -21,10 +21,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="capital-agent")
     parser.add_argument("command", nargs="?", default="run",
                         choices=("run", "status", "analyze-once",
-                                 "strategy-once", "backtest"),
-                        help="run | status | analyze-once (read-only) | "
-                             "strategy-once (preview flow, needs CAP_DRY_RUN=true) | "
-                             "backtest (replay strategy on historical bars)")
+                                 "strategy-once", "backtest",
+                                 "go-live", "go-demo"),
+                        help="run | status | analyze-once | strategy-once | "
+                             "backtest | go-live (flip .env fuses ON) | "
+                             "go-demo (flip fuses OFF)")
     parser.add_argument("--epic", default="GOLD",
                         help="Epic for analyze/strategy/backtest (default: GOLD)")
     parser.add_argument("--strategy", default="rsi_mean_reversion",
@@ -35,6 +36,8 @@ def main() -> int:
                         help="Backtest bar count")
     parser.add_argument("--from-iso", default=None)
     parser.add_argument("--to-iso", default=None)
+    parser.add_argument("--confirm", action="store_true",
+                        help="Skip interactive prompt on go-live (scripted use only)")
     args = parser.parse_args()
 
     if args.command == "run":
@@ -95,7 +98,72 @@ def main() -> int:
 
         return asyncio.run(_bt())
 
+    if args.command in ("go-live", "go-demo"):
+        return _flip_env(target=args.command, skip_prompt=args.confirm)
+
     return 1
+
+
+def _flip_env(*, target: str, skip_prompt: bool) -> int:
+    """Rewrite .env to set CAP_DRY_RUN + I_UNDERSTAND_LIVE_RISK atomically."""
+    from pathlib import Path
+    env_path = Path(".env")
+    if not env_path.exists():
+        print("ERROR: .env not found in cwd")
+        return 1
+    lines = env_path.read_text(encoding="utf-8").splitlines()
+
+    if target == "go-live":
+        print("\n" + "=" * 60)
+        print("  GO-LIVE CEREMONY")
+        print("=" * 60)
+        print("  This will flip CAP_DRY_RUN=false and")
+        print("  I_UNDERSTAND_LIVE_RISK=YES in your .env.")
+        print("")
+        print("  Even on your DEMO account, this means real preview -> ")
+        print("  execute calls will hit Capital.com and open real")
+        print("  positions on your demo balance.")
+        print("")
+        print("  Sanity checks before continuing:")
+        print("  - CAP_ENV should be 'demo' unless you REALLY know")
+        print("  - Your kill switch must be UNLOCKED")
+        print("  - Your risk.yaml limits should be tight")
+        print("=" * 60)
+        if not skip_prompt:
+            reply = input('Type "GO LIVE" exactly (or anything else to abort): ')
+            if reply.strip() != "GO LIVE":
+                print("Aborted. No changes made.")
+                return 1
+        new_lines = []
+        set_dry = False; set_fuse = False
+        for line in lines:
+            if line.startswith("CAP_DRY_RUN="):
+                new_lines.append("CAP_DRY_RUN=false"); set_dry = True
+            elif line.startswith("I_UNDERSTAND_LIVE_RISK="):
+                new_lines.append("I_UNDERSTAND_LIVE_RISK=YES"); set_fuse = True
+            else:
+                new_lines.append(line)
+        if not set_dry: new_lines.append("CAP_DRY_RUN=false")
+        if not set_fuse: new_lines.append("I_UNDERSTAND_LIVE_RISK=YES")
+        env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        print("\n.env flipped to LIVE. Restart the scheduler to pick up the change.")
+        return 0
+
+    # go-demo
+    new_lines = []
+    set_dry = False; set_fuse = False
+    for line in lines:
+        if line.startswith("CAP_DRY_RUN="):
+            new_lines.append("CAP_DRY_RUN=true"); set_dry = True
+        elif line.startswith("I_UNDERSTAND_LIVE_RISK="):
+            new_lines.append("I_UNDERSTAND_LIVE_RISK=NO"); set_fuse = True
+        else:
+            new_lines.append(line)
+    if not set_dry: new_lines.append("CAP_DRY_RUN=true")
+    if not set_fuse: new_lines.append("I_UNDERSTAND_LIVE_RISK=NO")
+    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    print(".env flipped to DEMO (dry-run). Restart the scheduler.")
+    return 0
 
 
 if __name__ == "__main__":

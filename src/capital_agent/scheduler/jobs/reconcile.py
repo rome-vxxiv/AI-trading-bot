@@ -18,6 +18,7 @@ from sqlalchemy import select
 from ...logging_config import get_logger
 from ...mcp_client import MCPClient
 from ...state import PositionsLocal, session_scope
+from .outcome_tagger import tag_closed_position
 
 log = get_logger(__name__)
 
@@ -81,14 +82,21 @@ async def run_reconcile(mcp: MCPClient) -> None:
                                  old=getattr(r, k), new=rp[k])
                         setattr(r, k, rp[k])
 
-        # local-only → prune
+        # local-only → position closed on broker. Prune + tag outcome.
+        closed = []
         for deal_id, lr in list(local.items()):
             if deal_id not in remote:
-                log.warning("reconcile.prune_local_only",
-                            deal_id=deal_id, epic=lr.epic)
+                log.info("reconcile.position_closed",
+                         deal_id=deal_id, epic=lr.epic)
+                closed.append((deal_id, lr.epic, lr.strategy_id))
                 await s.delete(lr)
 
         await s.commit()
+
+    # Tag closed positions with realized P&L (outside the DB txn so the
+    # tagger's own commits don't fight with ours).
+    for deal_id, epic, strat in closed:
+        await tag_closed_position(mcp, deal_id, epic, strat)
 
     log.info("reconcile.ok", broker_positions=len(remote),
              local_positions=len(local))
