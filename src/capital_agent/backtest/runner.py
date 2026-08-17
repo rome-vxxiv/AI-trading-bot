@@ -6,12 +6,14 @@ and prints a signal timeline. No trades are placed.
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from datetime import datetime
 from typing import Any
 
 from ..logging_config import get_logger
 from ..mcp_client import lifespan_mcp
 from .rsi_strategy import decide_series
+from .simulate import simulate_trades
 
 log = get_logger(__name__)
 
@@ -53,6 +55,8 @@ async def run_backtest(epic: str, resolution: str = "MINUTE_15",
                 "reason": d.reason,
             })
 
+    sim = simulate_trades(highs, lows, closes, ts, decisions)
+
     summary = {
         "epic": epic,
         "resolution": resolution,
@@ -65,6 +69,24 @@ async def run_backtest(epic: str, resolution: str = "MINUTE_15",
         "last_atr": round(decisions[-1].atr, 6) if decisions and decisions[-1].atr is not None else None,
         "signal_count": len(signals),
         "signals": signals[-20:],   # tail — the full list gets long
+        "trade_simulation": {
+            "note": ("stop=2xATR, target=3xATR, one position at a time "
+                     "(mirrors risk.yaml max_positions_total=1), entry at "
+                     "signal-bar close, no spread/slippage/financing modeled "
+                     "-- real results will run behind this"),
+            "trade_count": sim.trade_count,
+            "wins": sim.wins,
+            "losses": sim.losses,
+            "open_at_end": sim.open_at_end,
+            "win_rate": round(sim.win_rate, 3) if sim.win_rate is not None else None,
+            "avg_win_r": round(sim.avg_win_r, 3) if sim.avg_win_r is not None else None,
+            "avg_loss_r": round(sim.avg_loss_r, 3) if sim.avg_loss_r is not None else None,
+            "expectancy_r": round(sim.expectancy_r, 3) if sim.expectancy_r is not None else None,
+            "total_r": round(sim.total_r, 3),
+            "max_drawdown_r": round(sim.max_drawdown_r, 3),
+            "profit_factor": round(sim.profit_factor, 3) if sim.profit_factor is not None else None,
+            "recent_trades": [asdict(t) for t in sim.trades[-20:]],
+        },
     }
     print(json.dumps(summary, indent=2, default=str))
     return summary

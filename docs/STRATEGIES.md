@@ -60,6 +60,35 @@ python -m capital_agent backtest --epic GOLD --resolution MINUTE_15 --max-bars 4
 .\run_backtest.ps1 -Epic GOLD
 ```
 
+## Trade-outcome simulation (`backtest.simulate`)
+
+`decide_series` only says *when* a signal fired — it says nothing about
+whether the trade would have made money. `backtest/simulate.py` closes
+that gap: it walks forward from each signal to a stop or target exit
+against the following bars, and `run_backtest` prints the result under
+`trade_simulation` — `win_rate`, `avg_win_r`/`avg_loss_r`, `expectancy_r`,
+`total_r`, `max_drawdown_r`, `profit_factor`, plus the last 20 individual
+trades. All P&L is expressed in **R** (multiples of initial risk): a
+trade that hits target is exactly `+1.5R` (target is 3×ATR, stop is
+2×ATR), a trade that hits its stop is exactly `-1.0R`.
+
+Stated assumptions — read these before trusting the numbers:
+
+- Entry fills at the signal bar's own close (the same price the live
+  playbook previews from).
+- A bar whose range touches both the stop and the target is resolved as
+  a stop (the conservative read — OHLC bars don't reveal which happened
+  first intrabar).
+- One open position at a time, mirroring `risk.yaml`'s
+  `max_positions_total: 1` — a signal while a trade is open is skipped,
+  not queued.
+- No spread, slippage, financing, or commission are modeled. Real
+  results will run behind this by some amount this module does not
+  estimate.
+
+This only evaluates historical signal quality — it says nothing about
+whether the same edge holds going forward.
+
 ## Adding a new strategy
 
 1. Write `prompts/my_strategy.md` — direct-imperative, `{EPIC}` placeholder, strict JSON schema for the reply. See `readonly_analysis.md` for shape.
