@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
+import time
 from pathlib import Path
 
 import structlog
@@ -19,8 +20,10 @@ def configure(log_dir: Path, level: str = "INFO") -> None:
     root.handlers.clear()
 
     console = logging.StreamHandler()
-    console.setFormatter(logging.Formatter("%(asctime)sZ %(levelname)-5s %(message)s",
-                                           datefmt="%Y-%m-%dT%H:%M:%S"))
+    console_formatter = logging.Formatter("%(asctime)sZ %(levelname)-5s %(message)s",
+                                          datefmt="%Y-%m-%dT%H:%M:%S")
+    console_formatter.converter = time.gmtime  # match the literal "Z" — logging defaults to local time otherwise
+    console.setFormatter(console_formatter)
     console.setLevel(level)
     root.addHandler(console)
 
