@@ -5,7 +5,7 @@ stop=2xATR / target=3xATR rule rather than trusting the code under test."""
 import pytest
 
 from capital_agent.backtest.rsi_strategy import Decision
-from capital_agent.backtest.simulate import simulate_trades
+from capital_agent.backtest.simulate import simulate_trades, summarize_trades
 
 HOLD = Decision("hold", None, None, None, "hold")
 
@@ -157,3 +157,33 @@ def test_no_trades_gives_none_stats_not_errors():
 def test_rejects_mismatched_lengths():
     with pytest.raises(ValueError):
         simulate_trades([1.0], [1.0], [1.0, 2.0], ["t0", "t1"], [HOLD, HOLD])
+
+
+def test_summarize_trades_combines_multiple_windows():
+    """This is what run_backtest_multi_window relies on: simulate each
+    window separately, concatenate the .trades lists, re-summarize once.
+    Must give the same combined numbers as summarizing everything at once."""
+    window_a_highs = [100.5, 104.0]
+    window_a_lows = [99.5, 99.0]
+    window_a_closes = [100.0, 103.0]
+    window_a_ts = ["a0", "a1"]
+    window_a_decisions = [_long_signal(), HOLD]
+    sim_a = simulate_trades(window_a_highs, window_a_lows, window_a_closes,
+                            window_a_ts, window_a_decisions)
+
+    window_b_highs = [100.5, 101.0]
+    window_b_lows = [99.5, 97.0]
+    window_b_closes = [100.0, 98.0]
+    window_b_ts = ["b0", "b1"]
+    window_b_decisions = [_long_signal(), HOLD]
+    sim_b = simulate_trades(window_b_highs, window_b_lows, window_b_closes,
+                            window_b_ts, window_b_decisions)
+
+    assert sim_a.trade_count == 1 and sim_a.trades[0].pnl_r == pytest.approx(1.5)
+    assert sim_b.trade_count == 1 and sim_b.trades[0].pnl_r == pytest.approx(-1.0)
+
+    combined = summarize_trades(sim_a.trades + sim_b.trades)
+    assert combined.trade_count == 2
+    assert combined.wins == 1 and combined.losses == 1
+    assert combined.total_r == pytest.approx(0.5)
+    assert combined.win_rate == pytest.approx(0.5)

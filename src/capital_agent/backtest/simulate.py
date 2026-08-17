@@ -97,7 +97,7 @@ def simulate_trades(
         # after this one has closed (or at end of data, stop entirely).
         i = trade.exit_index + 1 if trade.exit_reason != "end_of_data" else n
 
-    return _summarize(trades)
+    return summarize_trades(trades)
 
 
 def _walk_to_exit(
@@ -141,7 +141,7 @@ def _pnl_r(direction: Direction, entry_price: float, exit_price: float, stop_dis
     return raw / stop_dist
 
 
-def _summarize(trades: list[TradeResult]) -> BacktestSummary:
+def summarize_trades(trades: list[TradeResult]) -> BacktestSummary:
     closed = [t for t in trades if t.exit_reason != "end_of_data"]
     open_at_end = len(trades) - len(closed)
     wins = [t for t in closed if t.pnl_r > 0]

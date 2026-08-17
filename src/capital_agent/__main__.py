@@ -21,12 +21,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="capital-agent")
     parser.add_argument("command", nargs="?", default="run",
                         choices=("run", "status", "analyze-once",
-                                 "strategy-once", "backtest", "performance",
-                                 "go-live", "go-demo",
+                                 "strategy-once", "backtest", "backtest-multi",
+                                 "performance", "go-live", "go-demo",
                                  "kill", "unlock", "jobs"),
                         help="run | status | analyze-once | strategy-once | "
-                             "backtest | performance | go-live | go-demo | "
-                             "kill | unlock | jobs")
+                             "backtest | backtest-multi | performance | "
+                             "go-live | go-demo | kill | unlock | jobs")
     parser.add_argument("--epic", default="GOLD",
                         help="Epic for analyze/strategy/backtest (default: GOLD)")
     parser.add_argument("--strategy", default="rsi_mean_reversion",
@@ -34,7 +34,9 @@ def main() -> int:
     parser.add_argument("--resolution", default="MINUTE_15",
                         help="Backtest bar resolution")
     parser.add_argument("--max-bars", type=int, default=400,
-                        help="Backtest bar count")
+                        help="Backtest bar count (backtest-multi: bars per window)")
+    parser.add_argument("--num-windows", type=int, default=4,
+                        help="backtest-multi: how many consecutive windows to walk back through")
     parser.add_argument("--from-iso", default=None)
     parser.add_argument("--to-iso", default=None)
     parser.add_argument("--confirm", action="store_true",
@@ -103,6 +105,21 @@ def main() -> int:
             return 0
 
         return asyncio.run(_bt())
+
+    if args.command == "backtest-multi":
+        from .backtest.runner import run_backtest_multi_window
+        from .logging_config import configure as configure_logging
+        from .settings import get_settings
+
+        async def _btm() -> int:
+            configure_logging(get_settings().capital_agent_log_dir)
+            await run_backtest_multi_window(
+                epic=args.epic, resolution=args.resolution,
+                bars_per_window=args.max_bars, num_windows=args.num_windows,
+                strategy=args.strategy, end_iso=args.to_iso)
+            return 0
+
+        return asyncio.run(_btm())
 
     if args.command == "performance":
         import json

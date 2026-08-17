@@ -123,6 +123,22 @@ python -m capital_agent backtest --epic GOLD --strategy rsi_trend_filtered --max
 .\run_backtest.ps1 -Strategy rsi_trend_filtered
 ```
 
+A selective rule like this one can produce too few trades in a single
+1000-bar (Capital.com's per-request cap) window to mean anything — one
+early GOLD test came back with 3 trades total across two windows. Use
+`backtest-multi` to walk backward through several consecutive,
+non-overlapping windows in one session and combine every trade into one
+real sample instead of doing that by hand:
+
+```
+python -m capital_agent backtest-multi --epic GOLD --strategy rsi_trend_filtered --max-bars 1000 --num-windows 5
+.\run_backtest.ps1 -Multi -Strategy rsi_trend_filtered -NumWindows 5
+```
+
+Output has a `windows` breakdown (so you can see whether results are
+consistent across periods, not just the pooled total) and a `combined`
+block in the same shape as a normal backtest's `trade_simulation`.
+
 Only promote it to a real playbook (new prompt file + `PlaybookSpec` +
 golden test, per "Adding a new strategy" below) once it's beaten the
 shipped rule across the same historical windows — not on a single
