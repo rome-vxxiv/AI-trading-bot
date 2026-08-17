@@ -15,6 +15,7 @@ from typing import Any
 
 from sqlalchemy import select
 
+from ...alerts import notify
 from ...logging_config import get_logger
 from ...mcp_client import MCPClient
 from ...state import PositionsLocal, session_scope
@@ -54,9 +55,12 @@ async def run_reconcile(mcp: MCPClient) -> None:
     payload = await mcp.call("cap_trade_positions_list")
     if not isinstance(payload, dict):
         log.warning("reconcile.bad_payload", payload=str(payload)[:200])
+        await notify("reconcile.bad_payload", payload_head=str(payload)[:120])
         return
     remote_raw = payload.get("positions") or []
     remote = {p["deal_id"]: p for p in (_parse_position(r) for r in remote_raw) if p}
+
+    drift_events: list[dict] = []
 
     async with session_scope() as s:
         rows = (await s.execute(select(PositionsLocal))).scalars().all()
@@ -73,6 +77,8 @@ async def run_reconcile(mcp: MCPClient) -> None:
                 log.warning("reconcile.adopt_broker_only",
                             deal_id=deal_id, epic=rp["epic"],
                             direction=rp["direction"], size=rp["size"])
+                drift_events.append({"kind": "adopted_broker_only", "deal_id": deal_id,
+                                     "epic": rp["epic"]})
             else:
                 r = local[deal_id]
                 for k in ("size", "entry", "stop", "tp"):
@@ -97,6 +103,15 @@ async def run_reconcile(mcp: MCPClient) -> None:
     # tagger's own commits don't fight with ours).
     for deal_id, epic, strat in closed:
         await tag_closed_position(mcp, deal_id, epic, strat)
+
+    # A broker-only position (drift_events) means the broker has something
+    # we didn't know about — worth a proactive alert since it may mean a
+    # manual trade, a missed execute confirmation, or a bug. Closed
+    # positions are already alerted by tag_closed_position via
+    # "position.closed", so they're not duplicated here.
+    if drift_events:
+        summary = "; ".join(f"{e['kind']}:{e['epic']}:{e['deal_id'][:10]}" for e in drift_events)
+        await notify("reconcile.drift_detected", events=summary[:300])
 
     log.info("reconcile.ok", broker_positions=len(remote),
              local_positions=len(local))

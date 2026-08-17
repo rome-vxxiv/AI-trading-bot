@@ -176,6 +176,7 @@ async def run_playbook_once(strategy: str, epic: str) -> dict[str, Any]:
     if claude_bin is None:
         log.error("playbook.claude_not_found",
                   hint="npm install -g @anthropic-ai/claude-code")
+        await notify("playbook.claude_not_found", strategy=strategy, epic=epic)
         return {"_error": "claude_not_found"}
     log.info("playbook.start", strategy=strategy, epic=epic, claude_bin=claude_bin,
              allowed=spec.allowed_csv, dry_run=os.environ.get("CAP_DRY_RUN"))
@@ -194,6 +195,7 @@ async def run_playbook_once(strategy: str, epic: str) -> dict[str, Any]:
                 account_balance=balance, policy=policy,
             )
         if ctx is None:
+            await notify("playbook.context_prep_failed", strategy=strategy, epic=epic)
             return {"_error": "preflight_context_failed"}
 
     # ---------------- Spawn Claude -------------------------------

@@ -4,6 +4,7 @@ short-held)."""
 
 from __future__ import annotations
 
+from ...alerts import notify
 from ...logging_config import get_logger
 from ...mcp_client import MCPClient
 
@@ -25,8 +26,13 @@ async def run_keepalive(mcp: MCPClient) -> None:
             await mcp.call("cap_session_login")
         except Exception as exc:  # noqa: BLE001
             log.error("keepalive.relogin_failed", error=str(exc))
+            await notify("keepalive.relogin_failed", error=str(exc)[:200])
             return
         status = await mcp.call("cap_session_status")
+        if not (isinstance(status, dict) and status.get("logged_in")):
+            log.error("keepalive.relogin_did_not_take", status=status)
+            await notify("keepalive.session_dead",
+                         hint="re-login call succeeded but session still not logged in")
 
     log.info(
         "keepalive.ok",

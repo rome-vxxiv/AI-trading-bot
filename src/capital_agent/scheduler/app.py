@@ -8,6 +8,7 @@ import signal
 from pathlib import Path
 
 import yaml
+from apscheduler.events import EVENT_JOB_MISSED
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -27,6 +28,7 @@ from .jobs.drawdown import run_drawdown_check
 from .jobs.keepalive import run_keepalive
 from .jobs.reconcile import run_reconcile
 from .jobs.session_reconcile import audit_sessions
+from .watchdog import on_job_missed
 
 log = get_logger(__name__)
 
@@ -42,6 +44,7 @@ def _load_allowlist(path: Path) -> list[str]:
 def build_scheduler(mcp: MCPClient, sessions) -> AsyncIOScheduler:
     s = get_settings()
     sched = AsyncIOScheduler(timezone="UTC")
+    sched.add_listener(on_job_missed, EVENT_JOB_MISSED)
 
     sched.add_job(
         run_keepalive, IntervalTrigger(seconds=s.keepalive_interval_seconds),

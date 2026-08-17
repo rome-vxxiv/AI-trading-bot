@@ -100,7 +100,32 @@ TELEGRAM_CHAT_ID=98765
 Fires on: `scheduler.starting`, `scheduler.stopped`, `kill_switch.activated`,
 `kill_switch.cleared`, `playbook.decision` (any non-hold), `playbook.rejected`
 (pre-flight), `playbook.parse_error`, `playbook.timeout`,
-`playbook.nonzero_exit`.
+`playbook.nonzero_exit`, `playbook.claude_not_found`,
+`playbook.context_prep_failed`, `keepalive.relogin_failed`,
+`keepalive.session_dead`, `reconcile.drift_detected` (broker has a
+position we didn't know about), `reconcile.bad_payload`,
+`position.closed` (with realized P&L), `execute.ok` / `execute.failed`,
+`risk.daily_loss_cap`, `kill_switch.drawdown_triggered`, and
+`system.possible_sleep_or_freeze` (see below).
+
+## Sleep / freeze detection
+
+`scheduler/watchdog.py` listens for APScheduler's `EVENT_JOB_MISSED`.
+Our jobs finish in single-digit seconds; if one fires more than 3
+minutes late, that's not a slow tick — it's the OS having suspended
+the process (laptop sleep, hibernate) or the host being severely
+overloaded. A sleep episode misses several jobs at once (keepalive +
+reconcile + drawdown + strategy, simultaneously on wake), so alerts
+are debounced to one Telegram message per 5-minute window rather than
+one per job.
+
+This only works while the process is still alive to notice the gap
+and send the alert. If the process itself crashes or the PC loses
+power, nothing inside it can act — see `scripts/external_watchdog.ps1`
+for a process-independent check that closes that gap: Windows Task
+Scheduler pings `/healthz` every few minutes and alerts via Telegram
+directly, with no dependency on the bot process being alive to send
+it.
 
 No Telegram config → alerts silently no-op; nothing else changes.
 
