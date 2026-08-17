@@ -7,13 +7,15 @@
 #   .\run_backtest.ps1                            # GOLD, MINUTE_15, 400 bars
 #   .\run_backtest.ps1 -Epic BTCUSD               # BTC crypto
 #   .\run_backtest.ps1 -Resolution HOUR -MaxBars 500
+#   .\run_backtest.ps1 -Strategy rsi_trend_filtered   # candidate under evaluation
 # ==============================================================
 param(
     [string]$Epic = "GOLD",
     [string]$Resolution = "MINUTE_15",
     [int]   $MaxBars = 400,
     [string]$From = "",
-    [string]$To   = ""
+    [string]$To   = "",
+    [string]$Strategy = "rsi_mean_reversion"
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,11 +28,12 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
 }
 
 $args = @("-m", "capital_agent", "backtest",
-          "--epic", $Epic, "--resolution", $Resolution, "--max-bars", $MaxBars)
+          "--epic", $Epic, "--resolution", $Resolution, "--max-bars", $MaxBars,
+          "--strategy", $Strategy)
 if ($From) { $args += @("--from-iso", $From) }
 if ($To)   { $args += @("--to-iso",   $To)   }
 
-Write-Host "[+] Backtesting rsi_mean_reversion on $Epic ($Resolution x $MaxBars bars)..." -ForegroundColor Green
+Write-Host "[+] Backtesting $Strategy on $Epic ($Resolution x $MaxBars bars)..." -ForegroundColor Green
 & .\.venv\Scripts\python.exe @args
 $exit = $LASTEXITCODE
 Write-Host ""

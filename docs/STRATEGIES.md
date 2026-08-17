@@ -89,6 +89,33 @@ Stated assumptions — read these before trusting the numbers:
 This only evaluates historical signal quality — it says nothing about
 whether the same edge holds going forward.
 
+## Candidate under evaluation: rsi_trend_filtered
+
+Backtesting `rsi_mean_reversion` against two consecutive real GOLD
+windows (Jul 17 – Aug 17) showed win rate and total R flipping sign
+between windows — combined expectancy across both was ~+0.03R/trade,
+indistinguishable from noise. The likely cause: the rule fades every
+RSI extreme with no trend awareness, so it repeatedly fights whichever
+direction the market is actually grinding in.
+
+`backtest/rsi_trend_filtered.py` tests one fix: only take a signal when
+it agrees with an SMA-50 trend filter (long only above the SMA, short
+only below it). Same RSI-14/ATR-14/stop/target math, just gated.
+
+This is **backtest-only** — no prompt file, no `PlaybookSpec`, no
+scheduler job. Compare it against the shipped rule before considering
+either:
+
+```
+python -m capital_agent backtest --epic GOLD --strategy rsi_trend_filtered --max-bars 1000
+.\run_backtest.ps1 -Strategy rsi_trend_filtered
+```
+
+Only promote it to a real playbook (new prompt file + `PlaybookSpec` +
+golden test, per "Adding a new strategy" below) once it's beaten the
+shipped rule across the same historical windows — not on a single
+good-looking run.
+
 ## Adding a new strategy
 
 1. Write `prompts/my_strategy.md` — direct-imperative, `{EPIC}` placeholder, strict JSON schema for the reply. See `readonly_analysis.md` for shape.

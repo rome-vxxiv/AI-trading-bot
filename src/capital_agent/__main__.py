@@ -93,7 +93,8 @@ def main() -> int:
             configure_logging(get_settings().capital_agent_log_dir)
             await run_backtest(epic=args.epic, resolution=args.resolution,
                                max_bars=args.max_bars,
-                               from_iso=args.from_iso, to_iso=args.to_iso)
+                               from_iso=args.from_iso, to_iso=args.to_iso,
+                               strategy=args.strategy)
             return 0
 
         return asyncio.run(_bt())

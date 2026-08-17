@@ -13,15 +13,25 @@ from typing import Any
 from ..logging_config import get_logger
 from ..mcp_client import lifespan_mcp
 from .rsi_strategy import decide_series
+from .rsi_trend_filtered import decide_series_trend_filtered
 from .simulate import simulate_trades
 
 log = get_logger(__name__)
+
+_DECISION_SERIES_FNS = {
+    "rsi_mean_reversion": decide_series,
+    "rsi_trend_filtered": decide_series_trend_filtered,
+}
 
 
 async def run_backtest(epic: str, resolution: str = "MINUTE_15",
                        max_bars: int = 400,
                        from_iso: str | None = None,
-                       to_iso: str | None = None) -> dict[str, Any]:
+                       to_iso: str | None = None,
+                       strategy: str = "rsi_mean_reversion") -> dict[str, Any]:
+    if strategy not in _DECISION_SERIES_FNS:
+        raise ValueError(f"unknown backtest strategy {strategy!r}, "
+                         f"known: {list(_DECISION_SERIES_FNS.keys())}")
     """Fetch bars and print/return the decision series."""
     async with lifespan_mcp() as mcp:
         args: dict[str, Any] = {"epic": epic, "resolution": resolution, "max": max_bars}
@@ -40,7 +50,7 @@ async def run_backtest(epic: str, resolution: str = "MINUTE_15",
     closes = [float(p["closePrice"]["bid"]) for p in prices]
     ts = [str(p.get("snapshotTime") or p.get("snapshotTimeUTC")) for p in prices]
 
-    decisions = decide_series(highs, lows, closes)
+    decisions = _DECISION_SERIES_FNS[strategy](highs, lows, closes)
 
     signals = []
     counts = {"enter_long": 0, "enter_short": 0, "hold": 0}
@@ -59,6 +69,7 @@ async def run_backtest(epic: str, resolution: str = "MINUTE_15",
 
     summary = {
         "epic": epic,
+        "strategy": strategy,
         "resolution": resolution,
         "bar_count": len(prices),
         "counts": counts,
