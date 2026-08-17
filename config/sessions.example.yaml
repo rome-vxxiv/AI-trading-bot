@@ -56,6 +56,32 @@ instruments:
     guards: []
   UK100: { open: "MON 07:00", close: "FRI 20:00", guards: [] }
 
+  # ---------------- Individual US equities --------------------------
+  # Unlike everything above, these actually close every night (no
+  # continuous overnight CFD session) and observe exchange holidays.
+  # Modeled as a Mon-Fri week span with a DAILY guard covering the
+  # overnight close -- the guard wraps midnight (20:00 one day ->
+  # 13:30 the next), which correctly excludes every night AND every
+  # weekend once combined with the outer Mon 13:30 / Fri 20:00 anchors.
+  #
+  # CAVEAT: 13:30-20:00 UTC is NYSE/NASDAQ regular hours during EDT
+  # (roughly mid-March to early November). During EST months the real
+  # open/close is 14:30-21:00 UTC -- this file does NOT auto-adjust for
+  # US daylight saving. If you trade these through a DST transition,
+  # verify against cap_market_get's reported openingHours and update
+  # this file by hand, or treat the mismatch as a known limitation.
+  #
+  # holiday_market: US ties these to the US calendar in holidays.yaml
+  # (crypto/FX/commodities/indices above don't set this -- they aren't
+  # affected by exchange holidays at all).
+  GOOGL:
+    open: "MON 13:30"
+    close: "FRI 20:00"
+    guards: ["DAILY 20:00-13:30"]
+    holiday_market: US
+  MSFT: { open: "MON 13:30", close: "FRI 20:00", guards: ["DAILY 20:00-13:30"], holiday_market: US }
+  NVDA: { open: "MON 13:30", close: "FRI 20:00", guards: ["DAILY 20:00-13:30"], holiday_market: US }
+
 # Global guard applied around every scheduled tick regardless of instrument:
 global_guards:
   # Skip first/last 5 minutes of the session windows above.

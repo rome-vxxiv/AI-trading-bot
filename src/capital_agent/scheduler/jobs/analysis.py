@@ -10,22 +10,25 @@ from datetime import UTC, datetime
 
 from ...driver import run_playbook_once
 from ...logging_config import get_logger
-from ...sessions import SessionsConfig, is_in_guard, is_open, next_open
+from ...sessions import HolidayCalendar, SessionsConfig, is_in_guard, is_open, next_open
 from ...sessions.window import within_edge_guard
 
 log = get_logger(__name__)
 
 
-async def run_analysis_job(epic: str, sessions: SessionsConfig, strategy_id: str) -> None:
+async def run_analysis_job(epic: str, sessions: SessionsConfig, strategy_id: str,
+                           holidays: HolidayCalendar | None = None) -> None:
     """Backwards-compat wrapper. `strategy_id` is used to pick the playbook."""
-    await _run_gated(epic=epic, sessions=sessions, strategy=strategy_id)
+    await _run_gated(epic=epic, sessions=sessions, strategy=strategy_id, holidays=holidays)
 
 
-async def run_strategy_job(epic: str, sessions: SessionsConfig, strategy_id: str) -> None:
-    await _run_gated(epic=epic, sessions=sessions, strategy=strategy_id)
+async def run_strategy_job(epic: str, sessions: SessionsConfig, strategy_id: str,
+                           holidays: HolidayCalendar | None = None) -> None:
+    await _run_gated(epic=epic, sessions=sessions, strategy=strategy_id, holidays=holidays)
 
 
-async def _run_gated(*, epic: str, sessions: SessionsConfig, strategy: str) -> None:
+async def _run_gated(*, epic: str, sessions: SessionsConfig, strategy: str,
+                     holidays: HolidayCalendar | None = None) -> None:
     now = datetime.now(UTC)
 
     sess = sessions.instruments.get(epic)
@@ -41,6 +44,11 @@ async def _run_gated(*, epic: str, sessions: SessionsConfig, strategy: str) -> N
             nxt = "unknown"
         log.info("job.skipped", epic=epic, strategy=strategy,
                  reason="session_closed", next_open_at=nxt)
+        return
+
+    if holidays is not None and holidays.is_holiday(sess.holiday_market, now.date()):
+        log.info("job.skipped", epic=epic, strategy=strategy,
+                 reason="exchange_holiday", market=sess.holiday_market)
         return
 
     if is_in_guard(sess.guards, now):

@@ -19,7 +19,7 @@ from ..logging_config import configure as configure_logging
 from ..logging_config import get_logger
 from ..mcp_client import MCPClient, lifespan_mcp
 from ..risk import ensure_killswitch_row, get_policy
-from ..sessions import load_sessions
+from ..sessions import HolidayCalendar, SessionsConfig, load_holidays, load_sessions
 from ..settings import get_settings
 from ..state import init_db
 from .jobs.analysis import run_analysis_job
@@ -28,6 +28,7 @@ from .jobs.drawdown import run_drawdown_check
 from .jobs.keepalive import run_keepalive
 from .jobs.reconcile import run_reconcile
 from .jobs.session_reconcile import audit_sessions
+from .jobs_config import JobDef, load_jobs
 from .watchdog import on_job_missed
 
 log = get_logger(__name__)
@@ -41,7 +42,8 @@ def _load_allowlist(path: Path) -> list[str]:
     return [str(e).strip() for e in (raw.get("epics") or []) if str(e).strip()]
 
 
-def build_scheduler(mcp: MCPClient, sessions) -> AsyncIOScheduler:
+def build_scheduler(mcp: MCPClient, sessions: SessionsConfig,
+                    holidays: HolidayCalendar, job_defs: list[JobDef]) -> AsyncIOScheduler:
     s = get_settings()
     sched = AsyncIOScheduler(timezone="UTC")
     sched.add_listener(on_job_missed, EVENT_JOB_MISSED)
@@ -68,17 +70,22 @@ def build_scheduler(mcp: MCPClient, sessions) -> AsyncIOScheduler:
         coalesce=True,
     )
 
-    # RSI mean-reversion on GOLD every 15 minutes (aligned :00/:15/:30/:45).
-    # Session-gated inside the job. Preflight + kill switch + cooldowns +
-    # postflight all live inside run_playbook_once via runner.py.
+    # Strategy jobs driven entirely by config/jobs.yaml -- adding an
+    # instrument to an existing strategy/tier is a config-only change.
+    # Session gating (open/closed, guards, holidays) is evaluated INSIDE
+    # each tick, not here -- an enabled job still correctly no-ops most
+    # ticks when its instrument's market is shut. Preflight risk checks
+    # (kill switch, cooldowns, allowlist, max positions) + postflight
+    # validation live inside run_playbook_once via runner.py.
     # CAP_DRY_RUN=true is enforced -- preview only, execute impossible.
-    sched.add_job(
-        run_analysis_job,
-        CronTrigger(minute="0,15,30,45", timezone="UTC"),
-        args=["GOLD", sessions, "rsi_mean_reversion"],
-        id="rsi_gold_15m", replace_existing=True, max_instances=1,
-        coalesce=True, misfire_grace_time=120,
-    )
+    for jd in job_defs:
+        sched.add_job(
+            run_analysis_job,
+            CronTrigger(minute=jd.cron_minutes, timezone="UTC"),
+            args=[jd.epic, sessions, jd.strategy, holidays],
+            id=jd.id, replace_existing=True, max_instances=1,
+            coalesce=True, misfire_grace_time=120,
+        )
     return sched
 
 
@@ -113,6 +120,8 @@ async def run() -> int:
     await ensure_killswitch_row()
     policy = get_policy(settings.capital_agent_config_dir)
     sessions = load_sessions(settings.capital_agent_config_dir / "sessions.yaml")
+    holidays = load_holidays(settings.capital_agent_config_dir / "holidays.yaml")
+    job_defs = load_jobs(settings.capital_agent_config_dir / "jobs.yaml")
     allowlist = _load_allowlist(settings.capital_agent_config_dir / "allowlist.yaml")
     log.info("config.loaded",
              instruments=len(sessions.instruments),
@@ -120,7 +129,9 @@ async def run() -> int:
              session_edge_minutes=sessions.session_edge_minutes,
              dry_run=policy.dry_run,
              risk_pct=policy.risk_pct_per_trade,
-             max_positions_total=policy.max_positions_total)
+             max_positions_total=policy.max_positions_total,
+             holiday_markets=list(holidays.markets.keys()),
+             scheduled_jobs=[jd.id for jd in job_defs])
     await notify("scheduler.starting",
                  dry_run=policy.dry_run, allowlist=",".join(allowlist))
 
@@ -134,13 +145,12 @@ async def run() -> int:
         log.info("mcp.tools_ready", count=len(tools))
         await audit_sessions(mcp, sessions, allowlist)
 
-        sched = build_scheduler(mcp, sessions)
+        sched = build_scheduler(mcp, sessions, holidays, job_defs)
         sched.start()
         log.info("scheduler.started",
                  keepalive_s=settings.keepalive_interval_seconds,
                  reconcile_s=settings.reconciliation_interval_seconds,
-                 strategy="rsi_mean_reversion", epic="GOLD",
-                 cron="0,15,30,45 * * * *")
+                 jobs=[{"id": jd.id, "epic": jd.epic, "tier": jd.tier} for jd in job_defs])
 
         # Health API
         app = build_health_app(mcp=mcp, sched=sched)

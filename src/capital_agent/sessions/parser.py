@@ -46,6 +46,7 @@ class InstrumentSession:
     guards: list[Guard] = field(default_factory=list)
     cash_session: str | None = None
     continuous: bool = False
+    holiday_market: str | None = None   # e.g. "US" -> checked against holidays.yaml
 
 
 @dataclass
@@ -87,5 +88,6 @@ def load_sessions(path: Path) -> SessionsConfig:
             guards=guards,
             cash_session=cfg.get("cash_session"),
             continuous=(open_w == close_w),
+            holiday_market=cfg.get("holiday_market"),
         )
     return out

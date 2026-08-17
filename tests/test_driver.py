@@ -127,6 +127,74 @@ async def test_skipped_in_daily_guard(monkeypatch):
     assert calls == []
 
 
+def _googl_sessions() -> SessionsConfig:
+    return SessionsConfig(
+        instruments={
+            "GOOGL": InstrumentSession(
+                epic="GOOGL",
+                open=WeekdayTime(0, 13, 30),   # MON 13:30
+                close=WeekdayTime(4, 20, 0),   # FRI 20:00
+                guards=[Guard(time(20, 0), time(13, 30))],
+                holiday_market="US",
+            ),
+        },
+        session_edge_minutes=5,
+    )
+
+
+async def test_skipped_on_exchange_holiday(monkeypatch):
+    """Wed 15:00 is open and outside any guard for GOOGL -- the holiday
+    check must be the thing that blocks it, not session/guard logic."""
+    from datetime import date as _date
+
+    from capital_agent.sessions.holidays import HolidayCalendar
+
+    sessions = _googl_sessions()
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "capital_agent.scheduler.jobs.analysis.run_playbook_once",
+        _fake_runner(calls),
+    )
+    monkeypatch.setattr(
+        "capital_agent.scheduler.jobs.analysis.datetime",
+        _fixed_datetime(datetime(2026, 8, 12, 15, 0)),  # Wednesday, mid-session
+    )
+    holidays = HolidayCalendar(markets={"US": {_date(2026, 8, 12)}})
+    from pathlib import Path
+
+    from capital_agent.state import init_db
+    await init_db(Path("."))
+    await run_analysis_job("GOOGL", sessions, "rsi_mean_reversion", holidays=holidays)
+    assert calls == []
+
+
+async def test_fires_normally_when_not_a_holiday(monkeypatch):
+    """Same instrument/time as the skip test above, but the calendar's
+    holiday falls on a different date -- confirms holidays is opt-in per
+    date, not a blanket block once an instrument has holiday_market set."""
+    from datetime import date as _date
+
+    from capital_agent.sessions.holidays import HolidayCalendar
+
+    sessions = _googl_sessions()
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "capital_agent.scheduler.jobs.analysis.run_playbook_once",
+        _fake_runner(calls),
+    )
+    monkeypatch.setattr(
+        "capital_agent.scheduler.jobs.analysis.datetime",
+        _fixed_datetime(datetime(2026, 8, 12, 15, 0)),  # Wednesday, mid-session
+    )
+    holidays = HolidayCalendar(markets={"US": {_date(2026, 12, 25)}})
+    from pathlib import Path
+
+    from capital_agent.state import init_db
+    await init_db(Path("."))
+    await run_analysis_job("GOOGL", sessions, "rsi_mean_reversion", holidays=holidays)
+    assert calls == ["GOOGL"]
+
+
 def _fake_runner(sink: list[str]):
     async def _run(strategy: str, epic: str):
         sink.append(epic)

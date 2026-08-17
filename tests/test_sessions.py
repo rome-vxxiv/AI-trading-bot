@@ -99,3 +99,47 @@ def test_load_sessions_yaml(tmp_path):
     assert cfg.instruments["BTCUSD"].continuous is True
     assert cfg.instruments["GOLD"].continuous is False
     assert len(cfg.instruments["GOLD"].guards) == 1
+
+
+def test_load_sessions_parses_holiday_market(tmp_path):
+    p = tmp_path / "sessions.yaml"
+    p.write_text(
+        "instruments:\n"
+        "  GOOGL: { open: 'MON 13:30', close: 'FRI 20:00', guards: ['DAILY 20:00-13:30'], holiday_market: US }\n"
+        "  BTCUSD: { open: 'SUN 00:00', close: 'SUN 00:00', guards: [] }\n",
+        encoding="utf-8",
+    )
+    cfg = load_sessions(p)
+    assert cfg.instruments["GOOGL"].holiday_market == "US"
+    assert cfg.instruments["BTCUSD"].holiday_market is None
+
+
+def test_individual_equity_daily_open_close_pattern():
+    """GOOGL-style Mon 13:30 -> Fri 20:00 span + DAILY 20:00-13:30 guard
+    should behave like a real recurring 13:30-20:00 weekday window, not
+    a continuous multi-day span."""
+    s = InstrumentSession(
+        epic="GOOGL",
+        open=WeekdayTime(0, 13, 30),   # MON 13:30
+        close=WeekdayTime(4, 20, 0),   # FRI 20:00
+        guards=[Guard(time(20, 0), time(13, 30))],
+        holiday_market="US",
+    )
+    # Wednesday 15:00 -> open, not in guard
+    wed_mid = datetime(2026, 8, 12, 15, 0)
+    assert is_open(s, wed_mid)
+    assert not is_in_guard(s.guards, wed_mid)
+
+    # Wednesday 22:00 (overnight) -> "open" by the raw week-span check,
+    # but the DAILY guard should flag it.
+    wed_night = datetime(2026, 8, 12, 22, 0)
+    assert is_open(s, wed_night)
+    assert is_in_guard(s.guards, wed_night)
+
+    # Saturday -> outside the Mon-Fri span entirely.
+    saturday = datetime(2026, 8, 15, 12, 0)
+    assert not is_open(s, saturday)
+
+    # Monday 08:00, before the day's open -> outside the span.
+    monday_early = datetime(2026, 8, 10, 8, 0)
+    assert not is_open(s, monday_early)

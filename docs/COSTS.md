@@ -52,6 +52,35 @@ Crypto is 24/7:
                     ≈ $50 per month
 ```
 
+### Worked example — all 6 tracked instruments (current default)
+
+`config/jobs.yaml` enables `rsi_mean_reversion` at the `medium` (15-min)
+tier for six instruments. Weekly cost is driven entirely by each
+instrument's open-hours per week — equities trade far fewer hours than
+crypto/commodities/FX, so they're much cheaper per instrument despite
+running the same cadence:
+
+| Instrument | Session pattern | Open hours/week | Cost/week |
+| --- | --- | --- | --- |
+| GOLD | Sun 22:00 → Fri 21:00, minus daily 1h guard | 115 | $7.82 |
+| BTCUSD | 24/7 | 168 | $11.42 |
+| US500 | Same span as GOLD | 115 | $7.82 |
+| GOOGL | Mon-Fri 13:30-20:00 UTC only | 32.5 | $2.21 |
+| MSFT | Mon-Fri 13:30-20:00 UTC only | 32.5 | $2.21 |
+| NVDA | Mon-Fri 13:30-20:00 UTC only | 32.5 | $2.21 |
+| **Total** | | | **≈ $33.69/week ≈ $146/month** |
+
+This is lower than a naive "6× GOLD's cost" estimate (~$47/week) because
+the three individual equities only have a real market session ~6.5
+hours/weekday — the DAILY guard skips every overnight tick for free, same
+as session-closed skips for any other instrument. Actual spend will be
+somewhat lower still: preflight rejections (kill switch, cooldowns,
+`max_positions_total`) also skip the LLM call entirely, and with
+`max_positions_total: 1` (the current `risk.yaml` default) only one of
+these six can hold a position at a time — the other five still tick and
+get evaluated, but a `hold` verdict is cheap regardless of whether a
+position could actually be opened.
+
 ### Tuning knobs
 
 - **Cadence** — change `CronTrigger(minute="0,15,30,45", ...)` in
