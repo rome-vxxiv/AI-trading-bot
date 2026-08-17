@@ -14,6 +14,17 @@ above the SMA (buying a dip WITH an uptrend), only take a short when
 price is below it (shorting a bounce WITH a downtrend). Counter-trend
 crossings are held instead of traded.
 
+sma_period=200, not 50: verified empirically (random-walk trials across
+many seeds and SMA periods from 14 through 500) that RSI-14 extremes and
+"which side of the SMA is price on" are almost perfectly correlated for
+any SMA period within roughly 7x the RSI period -- a 14-bar RSI extreme
+is a large enough move to single-handedly decide which side of a
+50-to-100-bar average price sits on, so a filter using those periods
+together rejects nearly everything, in both directions, regardless of
+the actual market. Real separation between "oversold" and "below its
+longer-term trend" only starts appearing around 200+, which is why that
+is the default here rather than something closer to the RSI period.
+
 This is a candidate under evaluation, not a shipped playbook -- it has
 no prompt file and is not registered as a PlaybookSpec or scheduler job.
 Backtest it and compare against rsi_mean_reversion before considering
@@ -61,7 +72,7 @@ def decide_trend_filtered(
 
 def decide_series_trend_filtered(
     highs: Sequence[float], lows: Sequence[float], closes: Sequence[float],
-    *, rsi_period: int = 14, atr_period: int = 14, sma_period: int = 50,
+    *, rsi_period: int = 14, atr_period: int = 14, sma_period: int = 200,
     oversold: float = 30.0, overbought: float = 70.0,
     atr_stop_multiple: float = 2.0,
 ) -> list[Decision]:

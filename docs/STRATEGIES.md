@@ -99,8 +99,20 @@ RSI extreme with no trend awareness, so it repeatedly fights whichever
 direction the market is actually grinding in.
 
 `backtest/rsi_trend_filtered.py` tests one fix: only take a signal when
-it agrees with an SMA-50 trend filter (long only above the SMA, short
-only below it). Same RSI-14/ATR-14/stop/target math, just gated.
+it agrees with an SMA trend filter (long only above the SMA, short only
+below it). Same RSI-14/ATR-14/stop/target math, just gated.
+
+The SMA period matters more than it looks: an early version defaulted
+to SMA-50 and it never fired a single signal, in either direction, on
+1000 real GOLD bars *or* on dozens of synthetic random-walk trials.
+Verified this wasn't a bug — a 14-bar RSI extreme is a big enough move
+to single-handedly decide which side of anything from a 14- to
+~100-period SMA price ends up on, so "oversold AND above the SMA"
+(or the short equivalent) essentially never co-occurs at those periods.
+Real separation only starts appearing around SMA-200, which is the
+shipped default; `tests/test_rsi_trend_filtered.py` has a regression
+test on fixed-seed data that fails loudly if this ever silently stops
+firing again.
 
 This is **backtest-only** — no prompt file, no `PlaybookSpec`, no
 scheduler job. Compare it against the shipped rule before considering
