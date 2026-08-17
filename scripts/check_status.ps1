@@ -16,7 +16,7 @@ $proc = Get-Process python -ErrorAction SilentlyContinue
 if ($proc) {
     $proc | ForEach-Object { Write-Host "  RUNNING  pid=$($_.Id)  started=$($_.StartTime)" -ForegroundColor Green }
 } else {
-    Write-Host "  NOT RUNNING — start it with .\run_scheduler.ps1" -ForegroundColor Red
+    Write-Host "  NOT RUNNING - start it with .\run_scheduler.ps1" -ForegroundColor Red
 }
 
 Write-Host ""
@@ -31,7 +31,7 @@ try {
     Write-Host "  jobs:"
     $status.jobs | ForEach-Object { Write-Host "    $($_.id) -> next: $($_.next_run_time)" }
 } catch {
-    Write-Host "  NOT RESPONDING — scheduler isn't up (or health API port busy)" -ForegroundColor Red
+    Write-Host "  NOT RESPONDING - scheduler isn't up (or health API port busy)" -ForegroundColor Red
 }
 
 Write-Host ""

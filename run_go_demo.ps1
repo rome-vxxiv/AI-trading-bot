@@ -1,5 +1,5 @@
 # ==============================================================
-# GO DEMO — restore CAP_DRY_RUN=true + I_UNDERSTAND_LIVE_RISK=NO.
+# GO DEMO - restore CAP_DRY_RUN=true + I_UNDERSTAND_LIVE_RISK=NO.
 # Safe to run any time. Restart the scheduler after.
 # ==============================================================
 
