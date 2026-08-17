@@ -18,6 +18,31 @@ capital-agent status
 capital-agent jobs
 ```
 
+## Checking real performance
+
+Not a backtest — this reads what actually happened: every trade whose
+outcome was tagged (win/loss/flat + realized P&L) when the position
+genuinely closed at the broker.
+
+```bash
+capital-agent performance                              # everything
+capital-agent performance --report-epic GOLD
+capital-agent performance --report-strategy rsi_mean_reversion_live
+```
+
+```
+.\run_performance_report.ps1
+.\run_performance_report.ps1 -Epic GOLD
+```
+
+Early on this will mostly read `"trade_count": 0` — there's nothing to
+report until trades have actually closed. That's expected, not broken.
+Compare against `capital-agent backtest`'s `trade_simulation` for the
+same instrument: backtest tells you what the rule would have done
+historically, this tells you what it actually did. They should drift
+apart somewhat (backtest doesn't model spread/slippage/financing) — if
+they drift by a lot, something in execution is worth investigating.
+
 ## Kill everything
 
 If markets are misbehaving, if you're going on vacation, or if you
@@ -112,8 +137,10 @@ Restart the scheduler after each rotation.
 You've been running the dry-run scheduler for at least 30 days and
 the demo P&L is where you want it. Ceremony:
 
-1. Read your last 30 days of demo results:
-   `sqlite3 state/state.db "SELECT * FROM daily_stats ORDER BY utc_date DESC LIMIT 30"`.
+1. Read your last 30 days of demo results: `capital-agent performance`
+   (see "Checking real performance" above) — look at `win_rate`,
+   `profit_factor`, and `total_pnl` per instrument in `by_epic`, not
+   just the headline number.
 2. Confirm: kill switch works (`capital-agent kill && capital-agent unlock`).
 3. Confirm: Telegram alerts arrive (`capital-agent kill; capital-agent unlock`).
 4. **Set `CAP_ENV=live`** in `.env`. (Also update `CAP_API_KEY` /

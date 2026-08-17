@@ -21,11 +21,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="capital-agent")
     parser.add_argument("command", nargs="?", default="run",
                         choices=("run", "status", "analyze-once",
-                                 "strategy-once", "backtest",
+                                 "strategy-once", "backtest", "performance",
                                  "go-live", "go-demo",
                                  "kill", "unlock", "jobs"),
                         help="run | status | analyze-once | strategy-once | "
-                             "backtest | go-live | go-demo | kill | unlock | jobs")
+                             "backtest | performance | go-live | go-demo | "
+                             "kill | unlock | jobs")
     parser.add_argument("--epic", default="GOLD",
                         help="Epic for analyze/strategy/backtest (default: GOLD)")
     parser.add_argument("--strategy", default="rsi_mean_reversion",
@@ -38,6 +39,10 @@ def main() -> int:
     parser.add_argument("--to-iso", default=None)
     parser.add_argument("--confirm", action="store_true",
                         help="Skip interactive prompt on go-live (scripted use only)")
+    parser.add_argument("--report-epic", default=None,
+                        help="performance: filter to one epic (default: all)")
+    parser.add_argument("--report-strategy", default=None,
+                        help="performance: filter to one strategy id (default: all)")
     args = parser.parse_args()
 
     if args.command == "run":
@@ -98,6 +103,26 @@ def main() -> int:
             return 0
 
         return asyncio.run(_bt())
+
+    if args.command == "performance":
+        import json
+        from dataclasses import asdict
+
+        from .logging_config import configure as configure_logging
+        from .performance_report import build_performance_report
+        from .settings import get_settings
+        from .state import init_db
+
+        async def _perf() -> int:
+            settings = get_settings()
+            configure_logging(settings.capital_agent_log_dir)
+            await init_db(settings.capital_agent_state_dir)
+            report = await build_performance_report(
+                epic=args.report_epic, strategy_id=args.report_strategy)
+            print(json.dumps(asdict(report), indent=2, default=str))
+            return 0
+
+        return asyncio.run(_perf())
 
     if args.command in ("go-live", "go-demo"):
         return _flip_env(target=args.command, skip_prompt=args.confirm)
