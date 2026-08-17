@@ -160,9 +160,12 @@ def test_rejects_mismatched_lengths():
 
 
 def test_summarize_trades_combines_multiple_windows():
-    """This is what run_backtest_multi_window relies on: simulate each
-    window separately, concatenate the .trades lists, re-summarize once.
-    Must give the same combined numbers as summarizing everything at once."""
+    """summarize_trades is a public building block for combining trade
+    lists from more than one simulate_trades() call. (Note:
+    run_backtest_multi_window itself no longer does this -- it stitches
+    raw bars into one series and simulates once, to avoid force-closing
+    trades at artificial window boundaries. This test just locks the
+    combining function's own correctness.)"""
     window_a_highs = [100.5, 104.0]
     window_a_lows = [99.5, 99.0]
     window_a_closes = [100.0, 103.0]

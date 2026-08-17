@@ -126,18 +126,29 @@ python -m capital_agent backtest --epic GOLD --strategy rsi_trend_filtered --max
 A selective rule like this one can produce too few trades in a single
 1000-bar (Capital.com's per-request cap) window to mean anything — one
 early GOLD test came back with 3 trades total across two windows. Use
-`backtest-multi` to walk backward through several consecutive,
-non-overlapping windows in one session and combine every trade into one
-real sample instead of doing that by hand:
+`backtest-multi` to walk backward through several chunks in one session
+and evaluate them as a single combined sample instead of doing that by
+hand:
 
 ```
 python -m capital_agent backtest-multi --epic GOLD --strategy rsi_trend_filtered --max-bars 1000 --num-windows 5
 .\run_backtest.ps1 -Multi -Strategy rsi_trend_filtered -NumWindows 5
 ```
 
-Output has a `windows` breakdown (so you can see whether results are
-consistent across periods, not just the pooled total) and a `combined`
-block in the same shape as a normal backtest's `trade_simulation`.
+It fetches each 1000-bar chunk separately (that's the API's limit,
+not a design choice) but **stitches them into one chronological series
+before simulating** — never simulates chunk-by-chunk and pools the
+results. An earlier version did that and it silently force-closed any
+trade still open when a chunk ran out of bars, undercounting its real
+outcome even though the next chunk's data (the trade's actual future)
+was sitting right there. Consecutive fetches were also observed to
+overlap by a few bars rather than land perfectly back-to-back;
+`fetched_chunks` in the output reports `bars_dropped_as_overlap` per
+chunk so that's visible rather than silently absorbed. The single
+`combined` block (same shape as a normal backtest's `trade_simulation`)
+is the only trade-level result — there is no more misleading
+per-window trade breakdown, because trades no longer respect where one
+fetch happened to end and the next began.
 
 Only promote it to a real playbook (new prompt file + `PlaybookSpec` +
 golden test, per "Adding a new strategy" below) once it's beaten the
