@@ -12,26 +12,49 @@ inputs — enforced by `tests/test_backtest_indicators.py`.
 | --- | --- | --- | --- | --- |
 | `readonly_analysis` | `prompts/readonly_analysis.md` | — | none | step-3 surveillance |
 | `rsi_mean_reversion` | `prompts/rsi_mean_reversion.md` | `backtest.rsi_strategy.decide_series` | preview only | step-4 dry-run |
+| `rsi_mean_reversion_live` | `prompts/rsi_mean_reversion.md` (same prompt) | `backtest.rsi_strategy.decide_series` | preview + real execute | step-6 live — currently wired to GOLD's scheduled job only |
 
 ## Triple-layer safety
 
-Trading tools are never callable in step 4. Three independent gates:
+Trading tools are never callable by the LLM itself, in either mode.
+Three independent gates:
 
 1. **`--allowedTools`** — each `PlaybookSpec` in
    `src/capital_agent/driver/runner.py` whitelists exactly the tools the
-   playbook needs. `rsi_mean_reversion` allows preview but not execute.
+   playbook needs. Both `rsi_mean_reversion` and `rsi_mean_reversion_live`
+   allow Claude to call preview, never execute — that never changes, in
+   either mode. See "Live mode mechanics" below for who actually places
+   the order.
 2. **`--disallowedTools`** — the runner's `COMMON_DENIED` list blocks
    every `cap_trade_execute_*`, `cap_trade_positions_close`, and
-   `cap_trade_orders_cancel` for every playbook, unconditionally.
+   `cap_trade_orders_cancel` for every playbook, unconditionally —
+   including `rsi_mean_reversion_live`. Claude cannot call these tools
+   no matter what `.env` says.
 3. **`CAP_DRY_RUN=true`** — the upstream MCP server itself refuses to
    execute when this env var is set. The runner also refuses to spawn
    a strategy that has `require_dry_run=True` unless the env is set,
    so an accidental `.env` edit can't quietly go live.
 
-The `rsi_mean_reversion` spec has `require_dry_run=True`. To flip that
-off (step 6), set `require_dry_run=False` in the spec AND set
-`CAP_DRY_RUN=false` in `.env` AND set `I_UNDERSTAND_LIVE_RISK=YES`.
-All three are required.
+`rsi_mean_reversion` has `require_dry_run=True` and will refuse to run
+at all once `CAP_DRY_RUN=false` — it does not silently fall back to
+preview-only, it errors out (`_error: dry_run_required`) and does
+nothing. `rsi_mean_reversion_live` is the opposite: `require_dry_run=False`,
+`require_live_fuse=True`, and it refuses to run unless *both*
+`CAP_DRY_RUN=false` and `I_UNDERSTAND_LIVE_RISK=YES` are set in `.env`
+(`run_go_live.ps1` / `capital-agent go-live` sets both together). Flipping
+an instrument from one to the other in `config/jobs.yaml` is deliberate,
+one line, one instrument at a time — see `docs/SCHEDULER.md`.
+
+### Live mode mechanics
+
+Even with `rsi_mean_reversion_live`, Claude's role doesn't change: it
+still only ever calls `cap_trade_preview_position` and reports a
+decision, gated by the same `--allowedTools`/`--disallowedTools` pair as
+dry-run. The difference is entirely in `driver/runner.py`, after Claude
+exits: when `spec.executes_after_preview` is set, Python — not the LLM —
+re-checks the preview against postflight risk rules and, only if that
+passes, calls execute itself. The model never gets execute access in
+either mode.
 
 ## RSI mean-reversion (rsi_mean_reversion)
 

@@ -100,7 +100,7 @@ See [`docs/STRATEGIES.md`](STRATEGIES.md). Short version:
 2. `src/capital_agent/backtest/<name>.py` — Python twin of the decision rule.
 3. Register a `PlaybookSpec` in `driver/runner.py`'s `PLAYBOOKS`.
 4. Add golden-numbers test in `tests/test_backtest_indicators.py`.
-5. Wire a scheduler job in `scheduler/app.py` when ready.
+5. Wire a scheduler job by adding an entry to `config/jobs.yaml` when ready.
 
 ## Backups
 

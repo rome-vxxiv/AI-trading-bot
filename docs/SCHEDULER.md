@@ -47,9 +47,13 @@ jobs:
 `tiers:` is the real source of cadence — `minutes` controls the
 cron-minute spacing within each hour and must divide evenly into 60.
 Current default: all six instruments (GOLD, BTCUSD, US500, GOOGL, MSFT,
-NVDA) on the `medium` (15-min) tier, all running `rsi_mean_reversion`
-(dry-run/preview-only — see `docs/RISK.md` for what it takes to flip an
-instrument to `rsi_mean_reversion_live`).
+NVDA) on the `medium` (15-min) tier. GOLD runs `rsi_mean_reversion_live`
+(real execute calls after preview — see docs/STRATEGIES.md "Triple-layer
+safety" and docs/OPERATIONS.md "Escalation to live"); the other five run
+plain `rsi_mean_reversion` (dry-run/preview-only). Flip another
+instrument to `_live` the same way GOLD was: edit its `strategy:` line
+in `config/jobs.yaml` — one instrument at a time, deliberately, never in
+a batch edit.
 
 Each tick is gated, in order, inside `scheduler/jobs/analysis.py`
 (`_run_gated`) — an enabled job still correctly no-ops most ticks when
