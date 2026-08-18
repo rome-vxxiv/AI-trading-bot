@@ -1,31 +1,50 @@
-# Scheduled jobs: strategies x instruments x cadence tiers.
-# Only one enabled by default (slow-tier crypto).
+# Scheduled jobs: strategy x instrument x cadence tier. Each `enabled: true`
+# entry is registered by scheduler/app.py at boot as a CronTrigger job.
+# Session gating (open/closed, guards, holidays) is evaluated INSIDE each
+# tick, not here -- an enabled job still correctly no-ops most ticks when
+# its instrument's market is shut.
+#
+# `tiers` IS read (not decorative) -- minutes controls the cron-minute
+# spacing within each hour. Must divide evenly into 60.
 
 tiers:
-  fast:   { interval_seconds: 300  }  # 5 min
-  medium: { interval_seconds: 900  }  # 15 min
-  slow:   { interval_seconds: 3600 }  # 60 min
-  eod:    { at: "23:30 UTC" }
+  fast:   { minutes: 5  }
+  medium: { minutes: 15 }
+  slow:   { minutes: 60 }
 
 jobs:
-
-  - id: donchian_btc_1h
-    enabled: true
-    strategy: donchian_breakout
-    epic: BTCUSD
-    tier: slow
-    active_windows: []                 # empty = whenever epic session is open
-
   - id: rsi_gold_15m
-    enabled: false
+    enabled: true
     strategy: rsi_mean_reversion
     epic: GOLD
     tier: medium
 
-  - id: session_open_us500
-    enabled: false
-    strategy: opening_range_breakout
+  - id: rsi_btcusd_15m
+    enabled: true
+    strategy: rsi_mean_reversion
+    epic: BTCUSD
+    tier: medium
+
+  - id: rsi_us500_15m
+    enabled: true
+    strategy: rsi_mean_reversion
     epic: US500
-    tier: fast
-    active_windows:
-      - "13:30-15:30 MON-FRI"
+    tier: medium
+
+  - id: rsi_googl_15m
+    enabled: true
+    strategy: rsi_mean_reversion
+    epic: GOOGL
+    tier: medium
+
+  - id: rsi_msft_15m
+    enabled: true
+    strategy: rsi_mean_reversion
+    epic: MSFT
+    tier: medium
+
+  - id: rsi_nvda_15m
+    enabled: true
+    strategy: rsi_mean_reversion
+    epic: NVDA
+    tier: medium

@@ -1,9 +1,19 @@
 # Tradable epics. Mirrors CAP_ALLOWED_EPICS in .env, but this file is the
 # scheduler's authoritative view — the driver refuses to trade an epic
 # absent here even if the MCP server would accept it.
+#
+# GOOGL/MSFT/NVDA epic codes are assumed to match the ticker directly
+# (Capital.com's usual convention for individual-share CFDs) but were
+# NOT verified against a live account when added. Restart the scheduler
+# and check the boot log for `session_audit.market` on each — a real
+# `broker_status` (e.g. "TRADEABLE"/"CLOSED") confirms the code is
+# right; a null/error means it needs correcting via cap_market_search.
 epics:
-  - BTCUSD    # only symbol enabled in first-run defaults
+  - BTCUSD
+  - GOLD
+  - US500
+  - GOOGL
+  - MSFT
+  - NVDA
 # - ETHUSD
-# - GOLD
 # - EURUSD
-# - US500

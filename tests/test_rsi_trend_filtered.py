@@ -1,0 +1,103 @@
+"""Trend-filtered RSI candidate. Same RSI/ATR math as the shipped
+rsi_mean_reversion rule, but a signal only fires when it agrees with
+an SMA trend filter -- these tests lock that gating behavior."""
+
+import random
+
+from capital_agent.backtest.indicators import sma
+from capital_agent.backtest.rsi_trend_filtered import (
+    decide_series_trend_filtered,
+    decide_trend_filtered,
+)
+
+
+def test_oversold_in_uptrend_enters_long():
+    d = decide_trend_filtered(rsi_value=25.0, atr_value=1.5, sma_value=100.0, close_value=105.0)
+    assert d.kind == "enter_long"
+    assert d.stop_distance == 3.0
+
+
+def test_oversold_in_downtrend_is_held_not_faded():
+    """Price below the SMA (downtrend) but RSI oversold -- counter-trend,
+    must NOT enter, unlike the plain rsi_mean_reversion rule."""
+    d = decide_trend_filtered(rsi_value=25.0, atr_value=1.5, sma_value=100.0, close_value=95.0)
+    assert d.kind == "hold"
+    assert "against the SMA trend" in d.reason
+
+
+def test_overbought_in_downtrend_enters_short():
+    d = decide_trend_filtered(rsi_value=75.0, atr_value=1.5, sma_value=100.0, close_value=95.0)
+    assert d.kind == "enter_short"
+    assert d.stop_distance == 3.0
+
+
+def test_overbought_in_uptrend_is_held_not_faded():
+    d = decide_trend_filtered(rsi_value=75.0, atr_value=1.5, sma_value=100.0, close_value=105.0)
+    assert d.kind == "hold"
+    assert "against the SMA trend" in d.reason
+
+
+def test_neutral_rsi_holds_regardless_of_trend():
+    d = decide_trend_filtered(rsi_value=50.0, atr_value=1.5, sma_value=100.0, close_value=105.0)
+    assert d.kind == "hold"
+    assert "neutral zone" in d.reason
+
+
+def test_holds_when_sma_not_yet_valid():
+    d = decide_trend_filtered(rsi_value=25.0, atr_value=1.5, sma_value=None, close_value=105.0)
+    assert d.kind == "hold"
+    assert "sma" in d.reason
+
+
+def test_holds_when_atr_missing():
+    d = decide_trend_filtered(rsi_value=25.0, atr_value=None, sma_value=100.0, close_value=105.0)
+    assert d.kind == "hold"
+    assert "atr" in d.reason
+
+
+def test_series_warmup_is_hold_until_longest_period_is_valid():
+    """sma_period=20 here is longer than rsi/atr's default 14, so the
+    series must stay in warmup (hold) until bar 20, not bar 14."""
+    n = 25
+    closes = [100.0 + (i % 3) for i in range(n)]  # mild oscillation, no trend
+    highs = [c + 0.5 for c in closes]
+    lows = [c - 0.5 for c in closes]
+    decisions = decide_series_trend_filtered(highs, lows, closes, sma_period=20)
+    assert len(decisions) == n
+    for d in decisions[:19]:
+        assert d.kind == "hold"
+
+
+def test_series_actually_fires_both_directions_on_realistic_data():
+    """Regression guard: an earlier version defaulted to sma_period=50,
+    which is close enough to the RSI period that an RSI-14 extreme
+    almost always single-handedly determines which side of the SMA
+    price is on -- the filter rejected nearly every signal in both
+    directions on ANY input, never just on the ones it should reject.
+    This proves the series path can actually reach both enter_long and
+    enter_short with the real (200) default, on realistic (noisy,
+    weakly-trending) data, not just via direct decide_trend_filtered()
+    calls with hand-picked inputs."""
+    random.seed(7)
+    n = 2000
+    closes = []
+    price = 100.0
+    for _ in range(n):
+        price += random.gauss(0.05, 1.0)
+        closes.append(price)
+    highs = [c + abs(random.gauss(0, 0.3)) for c in closes]
+    lows = [c - abs(random.gauss(0, 0.3)) for c in closes]
+
+    decisions = decide_series_trend_filtered(highs, lows, closes)  # default sma_period=200
+    smas = sma(closes, 200)
+
+    longs = [i for i, d in enumerate(decisions) if d.kind == "enter_long"]
+    shorts = [i for i, d in enumerate(decisions) if d.kind == "enter_short"]
+    assert longs, "expected at least one enter_long on this fixed-seed series"
+    assert shorts, "expected at least one enter_short on this fixed-seed series"
+
+    # Every fired signal must actually agree with its own trend filter.
+    for i in longs:
+        assert closes[i] > smas[i]
+    for i in shorts:
+        assert closes[i] < smas[i]

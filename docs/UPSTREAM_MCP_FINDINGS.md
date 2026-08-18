@@ -189,3 +189,45 @@ implementation in this repo uses the actual ones. Concretely:
 
 None of these changes weaken any risk control; they are pure name
 corrections. Flagged here rather than silently renamed.
+
+## 9. Step (1) verification — what has and hasn't been confirmed
+
+Run from this repo's `scripts/verify_step_1.py` against the upstream
+package `capital-mcp==0.3.0` installed in `.venv`.
+
+**Confirmed from inside this Claude Code container:**
+
+- Upstream server boots (`Capital.com MCP Server 0.3.0`, FastMCP 3.4.7).
+- MCP stdio transport handshake completes.
+- `tools/list` returns exactly the 38 tool names documented above,
+  spelled identically.
+- Local-only tools return valid payloads: `cap_session_status`
+  returns `{"logged_in": false, "env": "demo",
+  "base_url": "https://demo-api-capital.backend-capital.com", ...}`.
+
+**Not confirmed from this container** (egress policy blocks the
+destination): any tool that makes HTTP(S) to
+`demo-api-capital.backend-capital.com`. Proxy log shows
+`connect_rejected: gateway answered 403 to CONNECT (policy denial)`
+against `demo-api-capital.backend-capital.com:443`. So
+`cap_session_login` and everything downstream of an authenticated
+session cannot be exercised until the same script runs on a host with
+open outbound to Capital.com — i.e. your VPS. Same egress policy also
+blocks `git push`, so all work here is committed locally until the
+GitHub App has Contents:write on the repo.
+
+**To finish step (1) on your VPS:**
+
+```
+git clone https://github.com/SP24AM/AI-trading-bot.git
+cd AI-trading-bot
+cp .env.example .env  &&  <edit .env with CAP_* creds>
+python3 -m venv .venv
+./.venv/bin/pip install 'git+https://github.com/capital-com-sv/capital-mcp.git@main' mcp
+./.venv/bin/python scripts/verify_step_1.py > step_1_report.json
+```
+
+Expected in `step_1_report.json`: `cap_session_login.status == "OK"`,
+`cap_session_status_after_login.logged_in == true`, and a
+non-empty `cap_account_list.accounts` array (with at least one demo
+account). Paste that file back to unblock step (2).
